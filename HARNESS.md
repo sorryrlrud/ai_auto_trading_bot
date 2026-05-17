@@ -44,7 +44,7 @@ Do not commit `.env`, deploy keys, or private SSH material. The Compose service 
 
 - Source code is bind-mounted from the VM repository into the container at `/app`.
 - The bot runs from `docker-compose.yml` as service `coin-bot`.
-- The bot process runs as `BOT_UID:BOT_GID`, currently `1001:1002` on the GCP VM, to match the host repository owner.
+- The entrypoint starts as root only long enough to prepare SSH and create a lightweight bot user, then runs the Python bot as `BOT_UID:BOT_GID`, currently `1001:1002` on the GCP VM, to match the host repository owner.
 - The container timezone is intended to be KST through `TZ=Asia/Seoul`.
 - The VM host itself may still report UTC; check the container if the task concerns bot timestamps:
 
@@ -226,7 +226,7 @@ sudo chown -R sorryrlrud:sorryrlrud .git
 git pull --ff-only origin main
 ```
 
-The service now runs with the host-compatible UID/GID, so new Git objects should be user-owned. Keep the recovery command above in mind for older root-owned objects that may still exist.
+The entrypoint now drops the Python process to the host-compatible UID/GID, so new Git objects should be user-owned. Keep the recovery command above in mind for older root-owned objects that may still exist.
 
 ## Safe operating sequence for future changes
 

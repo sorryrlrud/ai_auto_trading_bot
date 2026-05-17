@@ -2,7 +2,18 @@
 set -eu
 
 : "${HOME:=/tmp/bot-home}"
+: "${BOT_UID:=1001}"
+: "${BOT_GID:=1002}"
+: "${BOT_USER:=bot}"
 export HOME
+
+if ! getent group "$BOT_GID" >/dev/null 2>&1; then
+  echo "$BOT_USER:x:$BOT_GID:" >> /etc/group
+fi
+
+if ! getent passwd "$BOT_UID" >/dev/null 2>&1; then
+  echo "$BOT_USER:x:$BOT_UID:$BOT_GID:Bot user:$HOME:/bin/sh" >> /etc/passwd
+fi
 
 if [ -d /host-ssh ]; then
   mkdir -p "$HOME/.ssh"
@@ -19,6 +30,10 @@ if [ -d /host-ssh ]; then
   [ -f "$HOME/.ssh/known_hosts" ] && chmod 644 "$HOME/.ssh/known_hosts"
 fi
 
-git config --global --add safe.directory /app
+chown -R "$BOT_UID:$BOT_GID" "$HOME"
 
-exec python -u autotrade.py
+setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
+  env HOME="$HOME" git config --global --add safe.directory /app
+
+exec setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
+  env HOME="$HOME" python -u autotrade.py
