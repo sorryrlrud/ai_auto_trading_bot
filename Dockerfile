@@ -4,9 +4,17 @@ FROM python:3.13-slim
 WORKDIR /app
 
 # 필요 시스템 패키지 설치 (gcc는 일부 파이썬 패키지 빌드 시 필요할 수 있음)
-RUN apt-get update && apt-get install -y \
+ENV TZ=Asia/Seoul
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     gcc \
+    git \
+    openssh-client \
     python3-dev \
+    tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
+    && git config --global --add safe.directory /app \
     && rm -rf /var/lib/apt/lists/*
 
 # 파이썬 의존성 복사 및 설치

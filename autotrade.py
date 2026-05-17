@@ -39,6 +39,7 @@ TRADE_ENABLED = os.getenv("TRADE_ENABLED", "false").lower() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() == "true"
 DASHBOARD_AUTO_PUBLISH = os.getenv("DASHBOARD_AUTO_PUBLISH", "false").lower() == "true"
 TRADE_HISTORY_FILE = "trade_history.json"
+DECISION_HISTORY_FILE = "decision_history.json"
 BOT_STATE_FILE = "bot_state.json"
 
 
@@ -130,6 +131,32 @@ def append_trade_history(record, path=TRADE_HISTORY_FILE):
         rows = []
 
     rows.append(record)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+
+
+def load_decision_history(path=DECISION_HISTORY_FILE):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        rows = []
+    return rows if isinstance(rows, list) else []
+
+
+def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=20):
+    rows = load_decision_history(path)
+    rows.append(
+        {
+            "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "risk_mode": plan.get("risk_mode", "unknown"),
+            "cash_reserve_pct": plan.get("cash_reserve_pct"),
+            "buy_threshold": plan.get("buy_threshold"),
+            "buy_budget_krw": plan.get("buy_budget_krw"),
+            "decisions": plan.get("decisions", []),
+        }
+    )
+    rows = rows[-keep:]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=2)
 
@@ -651,7 +678,6 @@ def execute_rebalance_plan(upbit, plan, state=None):
                 order = upbit.get_order(result["uuid"])
                 record = build_sell_history_record(decision, order)
                 append_trade_history(record)
-                refresh_dashboard()
                 logger.info(
                     "[REALIZED] %s profit=%s KRW (%s%%)",
                     ticker,
@@ -737,7 +763,9 @@ def main():
                 int(plan["buy_budget_krw"]),
                 json.dumps(plan["decisions"], ensure_ascii=False),
             )
+            append_decision_history(plan)
             execute_rebalance_plan(upbit, plan, state)
+            refresh_dashboard()
 
             logger.info(f"--- 리밸런싱 완료. {LOOP_SLEEP_SECONDS}초 대기합니다. ---")
             if RUN_ONCE:

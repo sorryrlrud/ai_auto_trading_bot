@@ -8,4 +8,5 @@ __pycache__/
 trading.log
 bot_state.json
 trade_history.json
+decision_history.json
 .DS_Store

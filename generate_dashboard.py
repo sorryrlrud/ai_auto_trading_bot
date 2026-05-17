@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 TRADE_HISTORY_FILE = ROOT / "trade_history.json"
+DECISION_HISTORY_FILE = ROOT / "decision_history.json"
 DASHBOARD_FILE = ROOT / "docs" / "index.html"
 
 
@@ -43,6 +44,17 @@ def load_realized_trades(path=TRADE_HISTORY_FILE):
     return trades
 
 
+def load_recent_decisions(path=DECISION_HISTORY_FILE, limit=3):
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        rows = []
+
+    if not isinstance(rows, list):
+        return []
+    return rows[-limit:]
+
+
 def summarize(trades):
     amount_rows = [row for row in trades if row["profit_krw"] is not None and row["cost_basis_krw"]]
     total_profit_krw = sum(row["profit_krw"] for row in amount_rows)
@@ -60,9 +72,12 @@ def summarize(trades):
     }
 
 
-def build_html(trades):
+def build_html(trades, recent_decisions):
     summary = summarize(trades)
-    payload = json.dumps({"summary": summary, "trades": trades}, ensure_ascii=False)
+    payload = json.dumps(
+        {"summary": summary, "trades": trades, "recent_decisions": recent_decisions},
+        ensure_ascii=False,
+    )
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -134,6 +149,52 @@ def build_html(trades):
       border-radius: 8px;
       background: var(--panel);
     }}
+    .section-title {{
+      margin: 28px 0 12px;
+      font-size: 18px;
+    }}
+    .decision-grid {{
+      display: grid;
+      gap: 12px;
+      margin-bottom: 20px;
+    }}
+    .decision-card {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }}
+    .decision-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 12px;
+    }}
+    .decision-list {{
+      display: grid;
+      gap: 8px;
+    }}
+    .decision-item {{
+      display: grid;
+      grid-template-columns: 92px 64px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      font-size: 14px;
+    }}
+    .badge {{
+      display: inline-flex;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    .badge.buy {{ color: var(--green); }}
+    .badge.sell {{ color: var(--red); }}
+    .badge.hold {{ color: var(--accent); }}
     table {{
       width: 100%;
       border-collapse: collapse;
@@ -170,6 +231,10 @@ def build_html(trades):
       table {{
         min-width: 760px;
       }}
+      .decision-item {{
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }}
     }}
   </style>
 </head>
@@ -202,6 +267,11 @@ def build_html(trades):
       </article>
     </section>
 
+    <h2 class="section-title">최근 판단 로그</h2>
+    <section class="decision-grid" id="decision-cards"></section>
+    <div class="empty" id="decision-empty" hidden>아직 공개할 판단 로그가 없습니다.</div>
+
+    <h2 class="section-title">실현 매매 기록</h2>
     <section class="table-wrap">
       <table>
         <thead>
@@ -245,6 +315,40 @@ def build_html(trades):
       node.classList.add(tone(value));
     }}
 
+    const decisionCards = document.getElementById("decision-cards");
+    const decisionEmpty = document.getElementById("decision-empty");
+    if (!data.recent_decisions.length) {{
+      decisionEmpty.hidden = false;
+    }} else {{
+      for (const entry of [...data.recent_decisions].reverse()) {{
+        const card = document.createElement("article");
+        card.className = "decision-card";
+        const meta = document.createElement("div");
+        meta.className = "decision-meta";
+        meta.textContent =
+          `${{entry.recorded_at || "-"}} · risk=${{entry.risk_mode || "-"}} · cash=${{entry.cash_reserve_pct ?? "-"}}% · threshold=${{entry.buy_threshold ?? "-"}} · budget=${{entry.buy_budget_krw == null ? "-" : `${{won.format(entry.buy_budget_krw)}}원`}}`;
+        card.appendChild(meta);
+
+        const list = document.createElement("div");
+        list.className = "decision-list";
+        for (const decision of entry.decisions || []) {{
+          const item = document.createElement("div");
+          item.className = "decision-item";
+          const ticker = document.createElement("div");
+          ticker.textContent = decision.ticker || "-";
+          const badge = document.createElement("div");
+          badge.className = `badge ${{String(decision.decision || "").toLowerCase()}}`;
+          badge.textContent = decision.decision || "-";
+          const reason = document.createElement("div");
+          reason.textContent = decision.reason || "-";
+          item.append(ticker, badge, reason);
+          list.appendChild(item);
+        }}
+        card.appendChild(list);
+        decisionCards.appendChild(card);
+      }}
+    }}
+
     const rows = document.getElementById("trade-rows");
     const empty = document.getElementById("empty-state");
     if (!data.trades.length) {{
@@ -273,8 +377,9 @@ def build_html(trades):
 
 def main():
     trades = load_realized_trades()
+    recent_decisions = load_recent_decisions()
     DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
-    DASHBOARD_FILE.write_text(build_html(trades), encoding="utf-8")
+    DASHBOARD_FILE.write_text(build_html(trades, recent_decisions), encoding="utf-8")
     print(f"Wrote {DASHBOARD_FILE}")
 
 

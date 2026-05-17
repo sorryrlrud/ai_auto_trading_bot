@@ -4,6 +4,7 @@ services:
     container_name: quant-ai-bot
     restart: always
     environment:
+      TZ: "${TZ:-Asia/Seoul}"
       UPBIT_ACCESS_KEY: "${UPBIT_ACCESS_KEY}"
       UPBIT_SECRET_KEY: "${UPBIT_SECRET_KEY}"
       TRADE_ENABLED: "${TRADE_ENABLED:-false}"
@@ -12,6 +13,7 @@ services:
       DASHBOARD_AUTO_PUBLISH: "${DASHBOARD_AUTO_PUBLISH:-false}"
     volumes:
       - .:/app
+      - ${HOME}/.ssh:/root/.ssh:ro
     logging:
       driver: "json-file"
       options:

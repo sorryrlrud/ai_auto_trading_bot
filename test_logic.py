@@ -124,6 +124,27 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(record["profit_pct"], 9.945)
         self.assertEqual(record["source"], "order_detail")
 
+    def test_decision_history_keeps_latest_entries(self):
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            for index in range(3):
+                autotrade.append_decision_history(
+                    {
+                        "risk_mode": "normal",
+                        "cash_reserve_pct": 25,
+                        "buy_threshold": 10,
+                        "buy_budget_krw": 10000 + index,
+                        "decisions": [{"ticker": f"KRW-{index}", "decision": "HOLD", "reason": "test"}],
+                    },
+                    path=f.name,
+                    keep=2,
+                )
+
+            rows = autotrade.load_decision_history(path=f.name)
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["buy_budget_krw"], 10001)
+        self.assertEqual(rows[1]["decisions"][0]["ticker"], "KRW-2")
+
     def test_stop_loss_generates_sell_without_ai(self):
         holding = {
             "ticker": "KRW-ETH",
