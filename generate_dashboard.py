@@ -312,7 +312,10 @@ def build_html(trades, recent_decisions):
     for (const [id, text, value] of statMap) {{
       const node = document.getElementById(id);
       node.textContent = text;
-      node.classList.add(tone(value));
+      const valueTone = tone(value);
+      if (valueTone) {{
+        node.classList.add(valueTone);
+      }}
     }}
 
     const decisionCards = document.getElementById("decision-cards");

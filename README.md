@@ -30,7 +30,8 @@ For automatic publishing from the VM:
 When enabled, the bot regenerates the dashboard, commits only `docs/index.html`, and pushes it after each rebalance cycle that changes the page.
 
 The container timezone defaults to `Asia/Seoul` through `TZ`, so log timestamps and dashboard generation timestamps use KST by default.
-Automatic publishing expects the host SSH configuration to be available at `${HOME}/.ssh`; the Compose service mounts it read-only at `/host-ssh`, and the entrypoint copies the deploy key/config into root-owned files with SSH-safe permissions before starting the bot.
+Automatic publishing expects the host SSH configuration to be available at `${HOME}/.ssh`; the Compose service mounts it read-only at `/host-ssh`, and the entrypoint copies the deploy key/config into the bot user's home with SSH-safe permissions before starting the bot.
+The service runs as `BOT_UID:BOT_GID` (default `1001:1002` on the GCP VM) so Git objects and runtime files created through the bind mount remain host-user writable.
 
 ## Local test
 

@@ -3,7 +3,9 @@ services:
     build: .
     container_name: quant-ai-bot
     restart: always
+    user: "${BOT_UID:-1001}:${BOT_GID:-1002}"
     environment:
+      HOME: "/tmp/bot-home"
       TZ: "${TZ:-Asia/Seoul}"
       UPBIT_ACCESS_KEY: "${UPBIT_ACCESS_KEY}"
       UPBIT_SECRET_KEY: "${UPBIT_SECRET_KEY}"

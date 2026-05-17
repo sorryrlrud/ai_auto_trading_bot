@@ -1,19 +1,24 @@
 #!/bin/sh
 set -eu
 
+: "${HOME:=/tmp/bot-home}"
+export HOME
+
 if [ -d /host-ssh ]; then
-  mkdir -p /root/.ssh
-  chmod 700 /root/.ssh
+  mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh"
 
   for file in config known_hosts ai_auto_trading_bot_deploy; do
     if [ -f "/host-ssh/$file" ]; then
-      cp "/host-ssh/$file" "/root/.ssh/$file"
+      cp "/host-ssh/$file" "$HOME/.ssh/$file"
     fi
   done
 
-  [ -f /root/.ssh/config ] && chmod 600 /root/.ssh/config
-  [ -f /root/.ssh/ai_auto_trading_bot_deploy ] && chmod 600 /root/.ssh/ai_auto_trading_bot_deploy
-  [ -f /root/.ssh/known_hosts ] && chmod 644 /root/.ssh/known_hosts
+  [ -f "$HOME/.ssh/config" ] && chmod 600 "$HOME/.ssh/config"
+  [ -f "$HOME/.ssh/ai_auto_trading_bot_deploy" ] && chmod 600 "$HOME/.ssh/ai_auto_trading_bot_deploy"
+  [ -f "$HOME/.ssh/known_hosts" ] && chmod 644 "$HOME/.ssh/known_hosts"
 fi
+
+git config --global --add safe.directory /app
 
 exec python -u autotrade.py

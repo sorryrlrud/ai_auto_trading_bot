@@ -38,12 +38,13 @@ Host github.com-ai-auto-trading-bot
   IdentitiesOnly yes
 ```
 
-Do not commit `.env`, deploy keys, or private SSH material. The Compose service mounts the host SSH directory read-only at `/host-ssh`, and `/app/docker-entrypoint.sh` copies only the needed files into `/root/.ssh` with SSH-safe permissions before the bot starts.
+Do not commit `.env`, deploy keys, or private SSH material. The Compose service mounts the host SSH directory read-only at `/host-ssh`, and `/app/docker-entrypoint.sh` copies only the needed files into the bot user's home with SSH-safe permissions before the bot starts.
 
 ## Runtime layout
 
 - Source code is bind-mounted from the VM repository into the container at `/app`.
 - The bot runs from `docker-compose.yml` as service `coin-bot`.
+- The bot process runs as `BOT_UID:BOT_GID`, currently `1001:1002` on the GCP VM, to match the host repository owner.
 - The container timezone is intended to be KST through `TZ=Asia/Seoul`.
 - The VM host itself may still report UTC; check the container if the task concerns bot timestamps:
 
@@ -136,7 +137,7 @@ PY
 - Switched dashboard refresh cadence from sell-only to every rebalance cycle.
 - Added KST container configuration.
 - Added Git and SSH support to the Dockerfile.
-- Added `docker-entrypoint.sh` so SSH credentials are copied into root-owned files with safe permissions.
+- Added `docker-entrypoint.sh` so SSH credentials are copied into bot-user-owned files with safe permissions.
 - Backfilled three recent decision snapshots from existing logs once so the dashboard did not start empty.
 - Verified automatic dashboard publishing end-to-end from inside the container.
 
@@ -178,16 +179,14 @@ This preserved installed packages without baking deploy keys into the image.
 
 Follow-up recommended: investigate why image export stalls on this VM before relying on routine rebuilds.
 
-### 2. Container-created files are root-owned on the host
+### 2. Historical root-owned runtime files on the host
 
-Runtime files created by the container can appear as root-owned in the bind-mounted repo. For example, `decision_history.json` was root-owned after first creation, so a host-side backfill script hit `PermissionError`.
+Before the bot was switched to `BOT_UID:BOT_GID`, runtime files created by the container appeared as root-owned in the bind-mounted repo. For example, `decision_history.json` was root-owned after first creation, so a host-side backfill script hit `PermissionError`.
 
-If a one-off maintenance write is needed for a root-owned runtime file, prefer running it inside the container:
+If a historical root-owned runtime file remains, repair it once on the host:
 
 ```bash
-docker exec -i quant-ai-bot python - <<'PY'
-# maintenance script here
-PY
+sudo chown sorryrlrud:sorryrlrud trade_history.json decision_history.json bot_state.json trading.log
 ```
 
 ### 3. SSH files mounted directly into `/root/.ssh` are rejected
@@ -198,7 +197,7 @@ Mounting `${HOME}/.ssh` directly into `/root/.ssh` caused OpenSSH to reject the 
 - ${HOME}/.ssh:/host-ssh:ro
 ```
 
-Then let `docker-entrypoint.sh` copy and chmod the needed files into `/root/.ssh`.
+Then let `docker-entrypoint.sh` copy and chmod the needed files into the bot user's home.
 
 ### 4. Dashboard automation advances `main`
 
@@ -210,9 +209,9 @@ The bot auto-commits dashboard updates. This means:
 
 Do not force-push over dashboard commits unless there is a deliberate reason.
 
-### 5. Container-side Git commits can leave root-owned `.git` objects
+### 5. Historical container-side Git commits left root-owned `.git` objects
 
-The bot currently runs as root inside the container. When `publish_dashboard.py` commits from inside the bind-mounted repository, new files under `.git/objects` can be created as `root:root`. Later, a host-side pull as `sorryrlrud` may fail with:
+Before the bot was switched to `BOT_UID:BOT_GID`, `publish_dashboard.py` committed from inside the bind-mounted repository as root, so new files under `.git/objects` could be created as `root:root`. Later, a host-side pull as `sorryrlrud` failed with:
 
 ```text
 error: insufficient permission for adding an object to repository database .git/objects
@@ -227,7 +226,7 @@ sudo chown -R sorryrlrud:sorryrlrud .git
 git pull --ff-only origin main
 ```
 
-Follow-up recommended: remove the ownership mismatch structurally, for example by running the bot process with the host repo UID/GID or by otherwise ensuring container-side Git writes use host-compatible ownership. Until then, check `.git` ownership if host-side Git commands fail unexpectedly.
+The service now runs with the host-compatible UID/GID, so new Git objects should be user-owned. Keep the recovery command above in mind for older root-owned objects that may still exist.
 
 ## Safe operating sequence for future changes
 
