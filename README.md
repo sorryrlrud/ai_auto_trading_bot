@@ -30,7 +30,7 @@ For automatic publishing from the VM:
 When enabled, the bot regenerates the dashboard, commits only `docs/index.html`, and pushes it after each rebalance cycle that changes the page.
 
 The container timezone defaults to `Asia/Seoul` through `TZ`, so log timestamps and dashboard generation timestamps use KST by default.
-Automatic publishing expects the host SSH configuration to be available at `${HOME}/.ssh`; the Compose service mounts it read-only into the container so the deploy key and host alias can be reused.
+Automatic publishing expects the host SSH configuration to be available at `${HOME}/.ssh`; the Compose service mounts it read-only at `/host-ssh`, and the entrypoint copies the deploy key/config into root-owned files with SSH-safe permissions before starting the bot.
 
 ## Local test
 

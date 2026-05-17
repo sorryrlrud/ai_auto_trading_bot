@@ -13,7 +13,8 @@ services:
       DASHBOARD_AUTO_PUBLISH: "${DASHBOARD_AUTO_PUBLISH:-false}"
     volumes:
       - .:/app
-      - ${HOME}/.ssh:/root/.ssh:ro
+      - ${HOME}/.ssh:/host-ssh:ro
+    command: ["sh", "/app/docker-entrypoint.sh"]
     logging:
       driver: "json-file"
       options:
