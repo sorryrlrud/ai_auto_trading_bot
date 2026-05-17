@@ -127,6 +127,7 @@ PY
    - `FileNotFoundError: [Errno 2] No such file or directory: 'git'`
    - later, after adding Git, SSH failed with `Bad owner or permissions on /root/.ssh/config`
 4. The live container and VM originally reported UTC timestamps. The container is now configured for KST.
+5. After automatic dashboard commits began working, host-side `git pull` later failed with `insufficient permission for adding an object to repository database .git/objects` because container-created Git objects were root-owned.
 
 ### Fixes applied
 
@@ -209,6 +210,25 @@ The bot auto-commits dashboard updates. This means:
 
 Do not force-push over dashboard commits unless there is a deliberate reason.
 
+### 5. Container-side Git commits can leave root-owned `.git` objects
+
+The bot currently runs as root inside the container. When `publish_dashboard.py` commits from inside the bind-mounted repository, new files under `.git/objects` can be created as `root:root`. Later, a host-side pull as `sorryrlrud` may fail with:
+
+```text
+error: insufficient permission for adding an object to repository database .git/objects
+fatal: failed to write object
+```
+
+Immediate recovery used on 2026-05-18:
+
+```bash
+cd /home/sorryrlrud/ai_auto_trading_bot
+sudo chown -R sorryrlrud:sorryrlrud .git
+git pull --ff-only origin main
+```
+
+Follow-up recommended: remove the ownership mismatch structurally, for example by running the bot process with the host repo UID/GID or by otherwise ensuring container-side Git writes use host-compatible ownership. Until then, check `.git` ownership if host-side Git commands fail unexpectedly.
+
 ## Safe operating sequence for future changes
 
 1. Confirm whether the task is about local development or the GCP live bot.
@@ -227,6 +247,7 @@ Do not force-push over dashboard commits unless there is a deliberate reason.
    - `git ls-remote origin HEAD` works inside the container
    - dashboard auto-publish succeeds on a real rebalance cycle
    - `recent_decisions` remains populated
+   - host-side `git pull --ff-only origin main` still succeeds after an automatic dashboard commit
 
 ## Security notes
 
