@@ -69,6 +69,52 @@
       border-radius: 8px;
       background: var(--panel);
     }
+    .section-title {
+      margin: 28px 0 12px;
+      font-size: 18px;
+    }
+    .decision-grid {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .decision-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .decision-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+    .decision-list {
+      display: grid;
+      gap: 8px;
+    }
+    .decision-item {
+      display: grid;
+      grid-template-columns: 92px 64px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      font-size: 14px;
+    }
+    .badge {
+      display: inline-flex;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .badge.buy { color: var(--green); }
+    .badge.sell { color: var(--red); }
+    .badge.hold { color: var(--accent); }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -105,6 +151,10 @@
       table {
         min-width: 760px;
       }
+      .decision-item {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
     }
   </style>
 </head>
@@ -137,6 +187,11 @@
       </article>
     </section>
 
+    <h2 class="section-title">최근 판단 로그</h2>
+    <section class="decision-grid" id="decision-cards"></section>
+    <div class="empty" id="decision-empty" hidden>아직 공개할 판단 로그가 없습니다.</div>
+
+    <h2 class="section-title">실현 매매 기록</h2>
     <section class="table-wrap">
       <table>
         <thead>
@@ -156,7 +211,7 @@
     </section>
   </main>
 
-  <script id="dashboard-data" type="application/json">{"summary": {"trade_count": 0, "win_rate": 0.0, "amount_trade_count": 0, "total_profit_krw": null, "avg_profit_pct": 0.0, "total_return_pct": null, "generated_at": "2026-05-17T10:07:57+00:00"}, "trades": []}</script>
+  <script id="dashboard-data" type="application/json">{"summary": {"trade_count": 2, "win_rate": 50.0, "amount_trade_count": 2, "total_profit_krw": -51.78, "avg_profit_pct": -0.1827, "total_return_pct": -0.1835, "generated_at": "2026-05-18T00:36:14+09:00"}, "trades": [{"executed_at": "2026-05-17T10:10:04+00:00", "ticker": "KRW-USDT", "profit_pct": 0.2868, "profit_krw": 40.39, "cost_basis_krw": 14086.21, "gross_proceeds_krw": 14133.68, "fee_krw": 7.07, "reason": "BTC 방어장세 및 개별 추세 훼손", "source": "order_detail"}, {"executed_at": "2026-05-17T14:44:04+00:00", "ticker": "KRW-DOGE", "profit_pct": -0.6521, "profit_krw": -92.17, "cost_basis_krw": 14133.97, "gross_proceeds_krw": 14048.83, "fee_krw": 7.02, "reason": "손실 -1.2% 및 단기 추세 훼손", "source": "order_detail"}], "recent_decisions": [{"recorded_at": "2026-05-18T00:34:47+09:00", "risk_mode": "defensive", "cash_reserve_pct": 60, "buy_threshold": 11.5, "buy_budget_krw": 20532.0, "decisions": [{"ticker": "KRW-BORA", "decision": "HOLD", "reason": "보유 추세 유지"}]}]}</script>
   <script>
     const data = JSON.parse(document.getElementById("dashboard-data").textContent);
     const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
@@ -178,6 +233,40 @@
       const node = document.getElementById(id);
       node.textContent = text;
       node.classList.add(tone(value));
+    }
+
+    const decisionCards = document.getElementById("decision-cards");
+    const decisionEmpty = document.getElementById("decision-empty");
+    if (!data.recent_decisions.length) {
+      decisionEmpty.hidden = false;
+    } else {
+      for (const entry of [...data.recent_decisions].reverse()) {
+        const card = document.createElement("article");
+        card.className = "decision-card";
+        const meta = document.createElement("div");
+        meta.className = "decision-meta";
+        meta.textContent =
+          `${entry.recorded_at || "-"} · risk=${entry.risk_mode || "-"} · cash=${entry.cash_reserve_pct ?? "-"}% · threshold=${entry.buy_threshold ?? "-"} · budget=${entry.buy_budget_krw == null ? "-" : `${won.format(entry.buy_budget_krw)}원`}`;
+        card.appendChild(meta);
+
+        const list = document.createElement("div");
+        list.className = "decision-list";
+        for (const decision of entry.decisions || []) {
+          const item = document.createElement("div");
+          item.className = "decision-item";
+          const ticker = document.createElement("div");
+          ticker.textContent = decision.ticker || "-";
+          const badge = document.createElement("div");
+          badge.className = `badge ${String(decision.decision || "").toLowerCase()}`;
+          badge.textContent = decision.decision || "-";
+          const reason = document.createElement("div");
+          reason.textContent = decision.reason || "-";
+          item.append(ticker, badge, reason);
+          list.appendChild(item);
+        }
+        card.appendChild(list);
+        decisionCards.appendChild(card);
+      }
     }
 
     const rows = document.getElementById("trade-rows");
