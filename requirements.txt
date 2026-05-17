@@ -1,0 +1,5 @@
+pyupbit
+python-dotenv
+pandas
+pandas-ta
+numba

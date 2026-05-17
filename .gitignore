@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.template
+venv/
+__pycache__/
+*.pyc
+*.log
+trading.log
+bot_state.json
+trade_history.json
+.DS_Store

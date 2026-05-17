@@ -1,0 +1,18 @@
+services:
+  coin-bot:
+    build: .
+    container_name: quant-ai-bot
+    restart: always
+    environment:
+      UPBIT_ACCESS_KEY: "${UPBIT_ACCESS_KEY}"
+      UPBIT_SECRET_KEY: "${UPBIT_SECRET_KEY}"
+      TRADE_ENABLED: "${TRADE_ENABLED:-false}"
+      RUN_ONCE: "${RUN_ONCE:-false}"
+      LOOP_SLEEP_SECONDS: "${LOOP_SLEEP_SECONDS:-900}"
+    volumes:
+      - .:/app
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

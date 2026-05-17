@@ -1,0 +1,179 @@
+import json
+import tempfile
+import unittest
+
+import autotrade
+
+
+def sample_market_row(ticker="KRW-ETH", **overrides):
+    row = {
+        "coin": ticker,
+        "p": 1000,
+        "volume_ratio": 1.8,
+        "price_change_1d": 2.0,
+        "price_change_3d": 4.0,
+        "price_change_1h": 1.0,
+        "price_change_6h": 3.0,
+        "atr_pct": 5.0,
+        "indicators": {
+            "daily": {
+                "rsi": 55,
+                "macd_hist": 10,
+                "ma5_over_20": True,
+                "ma20_over_60": True,
+                "price_over_ma20": True,
+                "bb_position": 0.65,
+            },
+            "1h": {
+                "rsi": 58,
+                "macd_hist": 5,
+                "ma5_over_long": True,
+                "price_over_long": True,
+                "volume_ratio": 1.4,
+            },
+            "15m": {
+                "rsi": 58,
+                "macd_hist": 2,
+                "ma5_over_long": True,
+                "price_over_long": True,
+                "volume_ratio": 1.2,
+            },
+        },
+    }
+    for key, value in overrides.items():
+        if key in row:
+            row[key] = value
+        elif key in row["indicators"]["daily"]:
+            row["indicators"]["daily"][key] = value
+        elif key.startswith("hour_"):
+            row["indicators"]["1h"][key.replace("hour_", "")] = value
+        elif key.startswith("minute_"):
+            row["indicators"]["15m"][key.replace("minute_", "")] = value
+    return row
+
+
+class TestTradingLogic(unittest.TestCase):
+    def test_upbit_error_payload_is_reported_cleanly(self):
+        class ErrorUpbit:
+            def get_balances(self):
+                return {"error": {"name": "no_authorization_ip", "message": "This is not a verified IP."}}
+
+        with self.assertRaisesRegex(RuntimeError, "no_authorization_ip"):
+            autotrade.get_current_holdings(ErrorUpbit())
+
+    def test_recent_losses_raise_cash_reserve(self):
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            json.dump(
+                [
+                    {"ticker": "KRW-A", "profit": -2.0},
+                    {"ticker": "KRW-B", "profit": -1.0},
+                    {"ticker": "KRW-C", "profit": 0.5},
+                    {"ticker": "KRW-D", "profit": -0.5},
+                    {"ticker": "KRW-E", "profit": -1.2},
+                ],
+                f,
+            )
+            f.flush()
+            perf = autotrade.load_recent_performance(path=f.name, limit=5)
+
+        reserve = autotrade.cash_reserve_pct(
+            {"risk_mode": "defensive", "market_volatility": "high"},
+            perf,
+        )
+        self.assertGreaterEqual(reserve, 80)
+
+    def test_stop_loss_generates_sell_without_ai(self):
+        holding = {
+            "ticker": "KRW-ETH",
+            "balance": 1,
+            "avg_buy_price": 1000,
+            "current_price": 960,
+            "value": 960,
+            "profit_pct": -4.0,
+        }
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row()],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[holding],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        self.assertEqual(plan["decisions"][0]["decision"], "SELL")
+
+    def test_weak_candidate_is_not_bought(self):
+        weak = sample_market_row(
+            ticker="KRW-WEAK",
+            volume_ratio=8.0,
+            price_change_1d=18.0,
+            atr_pct=15.0,
+            rsi=78,
+            macd_hist=-5,
+            ma5_over_20=False,
+            ma20_over_60=False,
+            price_over_ma20=False,
+            hour_rsi=82,
+            hour_macd_hist=-2,
+            hour_ma5_over_long=False,
+            hour_price_over_long=False,
+            minute_rsi=82,
+            minute_macd_hist=-2,
+            minute_ma5_over_long=False,
+            minute_price_over_long=False,
+            price_change_1h=8.0,
+        )
+        plan = autotrade.build_rebalance_plan(
+            market_data=[weak],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+    def test_strong_candidate_can_be_bought(self):
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-STRONG")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        buys = [d for d in plan["decisions"] if d["decision"] == "BUY"]
+        self.assertEqual(len(buys), 1)
+        self.assertEqual(buys[0]["ticker"], "KRW-STRONG")
+
+    def test_buy_budget_respects_total_portfolio_exposure(self):
+        holding = {
+            "ticker": "KRW-BTC",
+            "balance": 1,
+            "avg_buy_price": 100000,
+            "current_price": 100000,
+            "value": 75000,
+            "profit_pct": 0.0,
+        }
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-STRONG"), sample_market_row("KRW-BTC")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=25000,
+            current_holdings=[holding],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        self.assertEqual(plan["cash_reserve_pct"], 25)
+        self.assertEqual(plan["buy_budget_krw"], 0)
+
+    def test_buy_cooldown_blocks_recently_traded_ticker(self):
+        now_ts = 10_000
+        state = {"trades": {"KRW-STRONG": {"last_sell_ts": now_ts - 60}}}
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-STRONG")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+            state=state,
+            now_ts=now_ts,
+        )
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+if __name__ == "__main__":
+    unittest.main()
