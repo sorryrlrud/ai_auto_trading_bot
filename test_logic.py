@@ -82,6 +82,48 @@ class TestTradingLogic(unittest.TestCase):
         )
         self.assertGreaterEqual(reserve, 80)
 
+    def test_recent_performance_uses_realized_sell_rows(self):
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            json.dump(
+                [
+                    {"side": "BUY", "profit_pct": 99.0},
+                    {"side": "SELL", "profit_pct": 1.5},
+                    {"side": "SELL", "profit_pct": -0.5},
+                ],
+                f,
+            )
+            f.flush()
+            perf = autotrade.load_recent_performance(path=f.name, limit=10)
+
+        self.assertEqual(perf["count"], 2)
+        self.assertEqual(perf["avg_profit"], 0.5)
+        self.assertEqual(perf["net_profit"], 1.0)
+
+    def test_sell_history_record_uses_order_detail(self):
+        decision = {
+            "ticker": "KRW-ETH",
+            "balance": 2,
+            "avg_buy_price": 1000,
+            "current_price": 1100,
+            "profit_pct": 10.0,
+            "reason": "test",
+        }
+        order = {
+            "paid_fee": "1.1",
+            "trades": [
+                {"volume": "1.0", "funds": "1100"},
+                {"volume": "1.0", "funds": "1100"},
+            ],
+        }
+
+        record = autotrade.build_sell_history_record(decision, order)
+
+        self.assertEqual(record["gross_proceeds_krw"], 2200.0)
+        self.assertEqual(record["fee_krw"], 1.1)
+        self.assertEqual(record["profit_krw"], 198.9)
+        self.assertEqual(record["profit_pct"], 9.945)
+        self.assertEqual(record["source"], "order_detail")
+
     def test_stop_loss_generates_sell_without_ai(self):
         holding = {
             "ticker": "KRW-ETH",

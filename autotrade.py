@@ -3,6 +3,7 @@ import logging
 import os
 import subprocess
 import time
+from datetime import datetime
 
 import pandas as pd
 import pandas_ta as ta  # registers the df.ta accessor
@@ -107,8 +108,9 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
     except (FileNotFoundError, json.JSONDecodeError):
         rows = []
 
-    recent = rows[-limit:]
-    profits = [safe_float(row.get("profit")) for row in recent]
+    realized_rows = [row for row in rows if row.get("side", "SELL") == "SELL"]
+    recent = realized_rows[-limit:]
+    profits = [safe_float(row.get("profit_pct", row.get("profit"))) for row in recent]
     losses = [p for p in profits if p < 0]
 
     return {
@@ -116,6 +118,58 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
         "avg_profit": round(sum(profits) / len(profits), 3) if profits else 0.0,
         "loss_rate": round(len(losses) / len(profits), 3) if profits else 0.0,
         "net_profit": round(sum(profits), 3),
+    }
+
+
+def append_trade_history(record, path=TRADE_HISTORY_FILE):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        rows = []
+
+    rows.append(record)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+
+
+def refresh_dashboard():
+    try:
+        subprocess.run(["python", "generate_dashboard.py"], check=True)
+    except Exception as e:
+        logger.error(f"Dashboard refresh error: {e}")
+
+
+def _sum_trade_field(order, field):
+    trades = order.get("trades", []) if isinstance(order, dict) else []
+    return sum(safe_float(trade.get(field)) for trade in trades if isinstance(trade, dict))
+
+
+def build_sell_history_record(decision, order=None):
+    order = order if isinstance(order, dict) else {}
+    executed_volume = _sum_trade_field(order, "volume") or safe_float(decision.get("balance"))
+    gross_proceeds = _sum_trade_field(order, "funds") or executed_volume * safe_float(decision.get("current_price"))
+    fee_krw = safe_float(order.get("paid_fee"))
+    avg_buy_price = safe_float(decision.get("avg_buy_price"))
+    avg_sell_price = gross_proceeds / executed_volume if executed_volume else safe_float(decision.get("current_price"))
+    cost_basis = executed_volume * avg_buy_price
+    profit_krw = gross_proceeds - fee_krw - cost_basis
+    profit_pct = (profit_krw / cost_basis * 100) if cost_basis else safe_float(decision.get("profit_pct"))
+
+    return {
+        "executed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "side": "SELL",
+        "ticker": decision["ticker"],
+        "quantity": round(executed_volume, 12),
+        "avg_buy_price": round(avg_buy_price, 8),
+        "avg_sell_price": round(avg_sell_price, 8),
+        "cost_basis_krw": round(cost_basis, 2),
+        "gross_proceeds_krw": round(gross_proceeds, 2),
+        "fee_krw": round(fee_krw, 2),
+        "profit_krw": round(profit_krw, 2),
+        "profit_pct": round(profit_pct, 4),
+        "reason": decision.get("reason", ""),
+        "source": "order_detail" if order else "holding_snapshot",
     }
 
 
@@ -510,7 +564,21 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
 
     for holding in current_holdings:
         sell, reason = should_sell_holding(holding, data_by_ticker, market_context, state, now_ts)
-        decisions.append({"ticker": holding["ticker"], "decision": "SELL" if sell else "HOLD", "reason": reason})
+        decision = {
+            "ticker": holding["ticker"],
+            "decision": "SELL" if sell else "HOLD",
+            "reason": reason,
+        }
+        if sell:
+            decision.update(
+                {
+                    "balance": holding["balance"],
+                    "avg_buy_price": holding["avg_buy_price"],
+                    "current_price": holding["current_price"],
+                    "profit_pct": holding["profit_pct"],
+                }
+            )
+        decisions.append(decision)
 
     held_tickers = {holding["ticker"] for holding in current_holdings}
     sell_tickers = {d["ticker"] for d in decisions if d["decision"] == "SELL"}
@@ -577,6 +645,16 @@ def execute_rebalance_plan(upbit, plan, state=None):
             if result and "uuid" in result:
                 state["trades"].setdefault(ticker, {})["last_sell_ts"] = time.time()
                 save_bot_state(state)
+                order = upbit.get_order(result["uuid"])
+                record = build_sell_history_record(decision, order)
+                append_trade_history(record)
+                refresh_dashboard()
+                logger.info(
+                    "[REALIZED] %s profit=%s KRW (%s%%)",
+                    ticker,
+                    record["profit_krw"],
+                    record["profit_pct"],
+                )
             else:
                 logger.error(f"[SELL FAILED] {ticker} : {result}")
             time.sleep(1)
