@@ -21,6 +21,14 @@ To expose the page through GitHub Pages:
 
 The bot regenerates `docs/index.html` after each completed sell. Publishing updates to GitHub Pages still requires pushing the changed `docs/index.html` file to the repository.
 
+For automatic publishing from the VM:
+
+1. Add a repository-scoped deploy key with write access in GitHub.
+2. Change the VM remote to the SSH form: `git@github.com:sorryrlrud/ai_auto_trading_bot.git`.
+3. Set `DASHBOARD_AUTO_PUBLISH=true` in the VM `.env`.
+
+When enabled, the bot regenerates the dashboard, commits only `docs/index.html`, and pushes it after each completed sell.
+
 ## Local test
 
 ```bash

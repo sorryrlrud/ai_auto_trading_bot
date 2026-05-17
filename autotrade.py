@@ -37,6 +37,7 @@ MIN_HOLD_SECONDS = int(os.getenv("MIN_HOLD_SECONDS", "3600"))
 TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
 TRADE_ENABLED = os.getenv("TRADE_ENABLED", "false").lower() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() == "true"
+DASHBOARD_AUTO_PUBLISH = os.getenv("DASHBOARD_AUTO_PUBLISH", "false").lower() == "true"
 TRADE_HISTORY_FILE = "trade_history.json"
 BOT_STATE_FILE = "bot_state.json"
 
@@ -136,6 +137,8 @@ def append_trade_history(record, path=TRADE_HISTORY_FILE):
 def refresh_dashboard():
     try:
         subprocess.run(["python", "generate_dashboard.py"], check=True)
+        if DASHBOARD_AUTO_PUBLISH:
+            subprocess.run(["python", "publish_dashboard.py"], check=True)
     except Exception as e:
         logger.error(f"Dashboard refresh error: {e}")
 
