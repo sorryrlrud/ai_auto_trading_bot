@@ -328,13 +328,15 @@ def build_html(trades, recent_decisions):
         card.className = "decision-card";
         const meta = document.createElement("div");
         meta.className = "decision-meta";
+        const entryBlock = entry.entry_block_reason ? ` · entry_block=${{entry.entry_block_reason}}` : "";
         meta.textContent =
-          `${{entry.recorded_at || "-"}} · risk=${{entry.risk_mode || "-"}} · cash=${{entry.cash_reserve_pct ?? "-"}}% · threshold=${{entry.buy_threshold ?? "-"}} · budget=${{entry.buy_budget_krw == null ? "-" : `${{won.format(entry.buy_budget_krw)}}원`}}`;
+          `${{entry.recorded_at || "-"}} · risk=${{entry.risk_mode || "-"}} · cash=${{entry.cash_reserve_pct ?? "-"}}% · threshold=${{entry.buy_threshold ?? "-"}} · budget=${{entry.buy_budget_krw == null ? "-" : `${{won.format(entry.buy_budget_krw)}}원`}}${{entryBlock}}`;
         card.appendChild(meta);
 
         const list = document.createElement("div");
         list.className = "decision-list";
-        for (const decision of entry.decisions || []) {{
+        const decisions = entry.decisions || [];
+        for (const decision of decisions) {{
           const item = document.createElement("div");
           item.className = "decision-item";
           const ticker = document.createElement("div");
@@ -345,6 +347,12 @@ def build_html(trades, recent_decisions):
           const reason = document.createElement("div");
           reason.textContent = decision.reason || "-";
           item.append(ticker, badge, reason);
+          list.appendChild(item);
+        }}
+        if (!decisions.length && entry.entry_block_reason) {{
+          const item = document.createElement("div");
+          item.className = "muted";
+          item.textContent = `신규 진입 차단: ${{entry.entry_block_reason}}`;
           list.appendChild(item);
         }}
         card.appendChild(list);

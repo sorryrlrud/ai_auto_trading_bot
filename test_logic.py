@@ -2,6 +2,8 @@ import json
 import tempfile
 import unittest
 
+import pandas as pd
+
 import autotrade
 
 
@@ -237,6 +239,62 @@ class TestTradingLogic(unittest.TestCase):
             now_ts=now_ts,
         )
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+    def test_defensive_mode_blocks_new_buys(self):
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-STRONG")],
+            market_context={"risk_mode": "defensive", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+        self.assertEqual(plan["entry_block_reason"], "BTC 방어장세에서는 신규 매수 차단")
+
+    def test_high_atr_candidate_is_hard_blocked(self):
+        volatile = sample_market_row("KRW-VOLATILE", atr_pct=12.5)
+        plan = autotrade.build_rebalance_plan(
+            market_data=[volatile],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+    def test_small_loss_needs_hour_and_short_break_before_sell(self):
+        holding = {
+            "ticker": "KRW-ETH",
+            "balance": 1,
+            "avg_buy_price": 1000,
+            "current_price": 990,
+            "value": 990,
+            "profit_pct": -1.0,
+        }
+        row = sample_market_row(
+            minute_ma5_over_long=False,
+            minute_price_over_long=False,
+            minute_macd_hist=-1,
+        )
+        plan = autotrade.build_rebalance_plan(
+            market_data=[row],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[holding],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        self.assertEqual(plan["decisions"][0]["decision"], "HOLD")
+
+    def test_completed_candles_drop_latest_row(self):
+        df = pd.DataFrame({"close": [1, 2, 3, 4]})
+        completed = autotrade._completed_candles(df, min_rows=3)
+        self.assertEqual(completed["close"].tolist(), [1, 2, 3])
+
+    def test_next_cycle_aligns_to_boundary_with_buffer(self):
+        self.assertEqual(
+            autotrade.seconds_until_next_cycle(now_ts=901, interval_seconds=900, buffer_seconds=20),
+            919,
+        )
 
 if __name__ == "__main__":
     unittest.main()

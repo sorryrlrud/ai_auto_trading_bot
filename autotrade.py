@@ -35,6 +35,9 @@ PROFIT_PROTECT_PCT = float(os.getenv("PROFIT_PROTECT_PCT", "1.2"))
 BASE_BUY_SCORE = float(os.getenv("BASE_BUY_SCORE", "10.0"))
 MIN_HOLD_SECONDS = int(os.getenv("MIN_HOLD_SECONDS", "3600"))
 TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
+CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20"))
+MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "12.0"))
+ALLOW_DEFENSIVE_BUYS = os.getenv("ALLOW_DEFENSIVE_BUYS", "false").lower() == "true"
 TRADE_ENABLED = os.getenv("TRADE_ENABLED", "false").lower() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() == "true"
 DASHBOARD_AUTO_PUBLISH = os.getenv("DASHBOARD_AUTO_PUBLISH", "false").lower() == "true"
@@ -153,6 +156,7 @@ def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=20):
             "cash_reserve_pct": plan.get("cash_reserve_pct"),
             "buy_threshold": plan.get("buy_threshold"),
             "buy_budget_krw": plan.get("buy_budget_krw"),
+            "entry_block_reason": plan.get("entry_block_reason"),
             "decisions": plan.get("decisions", []),
         }
     )
@@ -210,6 +214,9 @@ def get_market_context():
         if btc_df is None or len(btc_df) < 30:
             return {"btc_trend": "unknown", "risk_mode": "defensive"}
 
+        btc_df = _completed_candles(btc_df, min_rows=60)
+        if btc_df is None:
+            return {"btc_trend": "unknown", "risk_mode": "defensive"}
         btc_df.ta.rsi(append=True)
         btc_df["MA_20"] = btc_df["close"].rolling(20).mean()
         btc_df["MA_60"] = btc_df["close"].rolling(60).mean()
@@ -262,6 +269,13 @@ def _atr_pct(df, current_price):
     return finite_float((atr / current_price) * 100)
 
 
+def _completed_candles(df, min_rows=30):
+    """Drop the latest in-progress candle and keep only completed candles."""
+    if df is None or len(df) < min_rows + 1:
+        return None
+    return df.iloc[:-1].copy()
+
+
 def _add_basic_indicators(df, ma_long=20):
     df.ta.rsi(append=True)
     df.ta.macd(append=True)
@@ -293,6 +307,12 @@ def get_market_data(ticker):
         df_15m = pyupbit.get_ohlcv(ticker, interval="minute15", count=80)
         _sleep_api()
         if df_1h is None or len(df_1h) < 30 or df_15m is None or len(df_15m) < 30:
+            return None
+
+        df = _completed_candles(df, min_rows=60)
+        df_1h = _completed_candles(df_1h, min_rows=30)
+        df_15m = _completed_candles(df_15m, min_rows=30)
+        if df is None or df_1h is None or df_15m is None:
             return None
 
         df = _add_basic_indicators(df)
@@ -424,6 +444,30 @@ def buy_score_threshold(market_context, recent_performance):
     if recent_performance["loss_rate"] >= 0.6:
         threshold += 1.0
     return threshold
+
+
+def entry_block_reason(data, market_context):
+    daily = data["indicators"]["daily"]
+    hour = data["indicators"]["1h"]
+    minute = data["indicators"]["15m"]
+
+    if market_context.get("risk_mode") == "defensive" and not ALLOW_DEFENSIVE_BUYS:
+        return "BTC 방어장세에서는 신규 매수 차단"
+    if data["atr_pct"] > MAX_ENTRY_ATR_PCT:
+        return f"ATR {data['atr_pct']}% > {MAX_ENTRY_ATR_PCT}%"
+    if not daily["ma20_over_60"]:
+        return "일봉 장기 추세 미정렬(MA20<=MA60)"
+    if not daily["price_over_ma20"]:
+        return "현재가가 일봉 MA20 아래"
+    if not (hour["ma5_over_long"] and hour["price_over_long"] and hour["macd_hist"] > 0):
+        return "1시간 추세 미정렬"
+    if not (minute["ma5_over_long"] and minute["price_over_long"] and minute["macd_hist"] > 0):
+        return "15분 추세 미정렬"
+    if daily["rsi"] > 72 or hour["rsi"] > 75 or minute["rsi"] > 78:
+        return "과열 구간"
+    if data["volume_ratio"] > 5 or data["price_change_1d"] > 12 or data["price_change_1h"] > 7:
+        return "급등 추격 구간"
+    return None
 
 
 def score_coin(data, market_context):
@@ -574,8 +618,8 @@ def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
         return True, f"수익 {profit_pct}% 보호: 15분 추세 훼손"
     if age is not None and age < MIN_HOLD_SECONDS and profit_pct > STOP_LOSS_PCT:
         return False, f"최소 보유시간 유지({int(age)}초/{MIN_HOLD_SECONDS}초)"
-    if profit_pct < -0.7 and (short_broken or hour_broken):
-        return True, f"손실 {profit_pct}% 및 단기 추세 훼손"
+    if profit_pct < -0.7 and short_broken and hour_broken:
+        return True, f"손실 {profit_pct}% 및 15분/1시간 추세 동반 훼손"
     if profit_pct < 0 and trend_broken:
         return True, f"손실 {profit_pct}% 상태에서 추세 훼손"
     if market_context.get("risk_mode") == "defensive" and (trend_broken or hour_broken):
@@ -591,6 +635,9 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
     reserve_pct = cash_reserve_pct(market_context, recent_performance)
     threshold = buy_score_threshold(market_context, recent_performance)
     decisions = []
+    entry_gate = None
+    if market_context.get("risk_mode") == "defensive" and not ALLOW_DEFENSIVE_BUYS:
+        entry_gate = "BTC 방어장세에서는 신규 매수 차단"
 
     for holding in current_holdings:
         sell, reason = should_sell_holding(holding, data_by_ticker, market_context, state, now_ts)
@@ -626,6 +673,9 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
             continue
         if is_buy_cooldown(ticker, state, now_ts):
             continue
+        rejected = entry_gate or entry_block_reason(row, market_context)
+        if rejected:
+            continue
         score, reason = score_coin(row, market_context)
         if score >= threshold:
             scored.append({"ticker": ticker, "score": score, "reason": reason})
@@ -646,9 +696,16 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
         "cash_reserve_pct": reserve_pct,
         "buy_threshold": round(threshold, 2),
         "buy_budget_krw": round(buy_budget_krw, 0),
+        "entry_block_reason": entry_gate,
         "risk_mode": market_context.get("risk_mode", "unknown"),
         "krw": krw,
     }
+
+
+def seconds_until_next_cycle(now_ts=None, interval_seconds=LOOP_SLEEP_SECONDS, buffer_seconds=CANDLE_CLOSE_BUFFER_SECONDS):
+    now_ts = now_ts or time.time()
+    next_boundary = ((int(now_ts) // interval_seconds) + 1) * interval_seconds + buffer_seconds
+    return max(next_boundary - now_ts, 1)
 
 
 def execute_rebalance_plan(upbit, plan, state=None):
@@ -767,11 +824,17 @@ def main():
             execute_rebalance_plan(upbit, plan, state)
             refresh_dashboard()
 
-            logger.info(f"--- 리밸런싱 완료. {LOOP_SLEEP_SECONDS}초 대기합니다. ---")
+            sleep_seconds = seconds_until_next_cycle()
+            logger.info(
+                "--- 리밸런싱 완료. 다음 %s초 경계 이후 %s초 버퍼까지 %s초 대기합니다. ---",
+                LOOP_SLEEP_SECONDS,
+                CANDLE_CLOSE_BUFFER_SECONDS,
+                int(sleep_seconds),
+            )
             if RUN_ONCE:
                 logger.info("RUN_ONCE=true. Exiting after one cycle.")
                 break
-            time.sleep(LOOP_SLEEP_SECONDS)
+            time.sleep(sleep_seconds)
         except Exception as e:
             logger.error(f"Main Loop Error: {e}")
             time.sleep(300)
