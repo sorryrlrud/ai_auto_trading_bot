@@ -3,7 +3,7 @@ import logging
 import os
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pandas_ta as ta  # registers the df.ta accessor
@@ -47,9 +47,11 @@ MAX_RECORDED_ENTRY_REJECTIONS = int(os.getenv("MAX_RECORDED_ENTRY_REJECTIONS", "
 TRADE_ENABLED = os.getenv("TRADE_ENABLED", "false").lower() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() == "true"
 DASHBOARD_AUTO_PUBLISH = os.getenv("DASHBOARD_AUTO_PUBLISH", "false").lower() == "true"
+DASHBOARD_HEARTBEAT_PUBLISH_SECONDS = int(os.getenv("DASHBOARD_HEARTBEAT_PUBLISH_SECONDS", "3600"))
 TRADE_HISTORY_FILE = "trade_history.json"
 DECISION_HISTORY_FILE = "decision_history.json"
 BOT_STATE_FILE = "bot_state.json"
+RUNTIME_STATUS_FILE = "runtime_status.json"
 
 
 def safe_float(value, default=0.0):
@@ -153,6 +155,104 @@ def load_decision_history(path=DECISION_HISTORY_FILE):
     return rows if isinstance(rows, list) else []
 
 
+def _iso_now(now=None):
+    now = now or datetime.now().astimezone()
+    return now.astimezone().isoformat(timespec="seconds")
+
+
+def _parse_iso_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_runtime_status(path=RUNTIME_STATUS_FILE):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            status = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        status = {}
+    return status if isinstance(status, dict) else {}
+
+
+def save_runtime_status(status, path=RUNTIME_STATUS_FILE):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(status, f, ensure_ascii=False, indent=2)
+
+
+def mark_cycle_started(path=RUNTIME_STATUS_FILE, now=None):
+    status = load_runtime_status(path)
+    status.update(
+        {
+            "loop_interval_seconds": LOOP_SLEEP_SECONDS,
+            "heartbeat_publish_interval_seconds": DASHBOARD_HEARTBEAT_PUBLISH_SECONDS,
+            "last_cycle_started_at": _iso_now(now),
+        }
+    )
+    save_runtime_status(status, path)
+    return status
+
+
+def mark_cycle_succeeded(next_expected_cycle_at=None, path=RUNTIME_STATUS_FILE, now=None):
+    status = load_runtime_status(path)
+    now_iso = _iso_now(now)
+    status.update(
+        {
+            "loop_interval_seconds": LOOP_SLEEP_SECONDS,
+            "heartbeat_publish_interval_seconds": DASHBOARD_HEARTBEAT_PUBLISH_SECONDS,
+            "last_cycle_completed_at": now_iso,
+            "last_success_at": now_iso,
+            "next_expected_cycle_at": next_expected_cycle_at,
+            "consecutive_failures": 0,
+        }
+    )
+    save_runtime_status(status, path)
+    return status
+
+
+def mark_cycle_failed(error, path=RUNTIME_STATUS_FILE, now=None):
+    status = load_runtime_status(path)
+    status.update(
+        {
+            "loop_interval_seconds": LOOP_SLEEP_SECONDS,
+            "heartbeat_publish_interval_seconds": DASHBOARD_HEARTBEAT_PUBLISH_SECONDS,
+            "last_error_at": _iso_now(now),
+            "last_error_type": type(error).__name__,
+            "consecutive_failures": int(status.get("consecutive_failures", 0)) + 1,
+        }
+    )
+    save_runtime_status(status, path)
+    return status
+
+
+def should_refresh_dashboard_for_heartbeat(
+    status=None,
+    *,
+    now=None,
+    interval_seconds=DASHBOARD_HEARTBEAT_PUBLISH_SECONDS,
+):
+    if interval_seconds <= 0:
+        return False
+
+    status = status or load_runtime_status()
+    last_refresh = _parse_iso_datetime(status.get("last_dashboard_refresh_at"))
+    if last_refresh is None:
+        return True
+
+    now_dt = now or datetime.now().astimezone()
+    return now_dt - last_refresh >= timedelta(seconds=interval_seconds)
+
+
+def mark_dashboard_refreshed(path=RUNTIME_STATUS_FILE, now=None):
+    status = load_runtime_status(path)
+    status["last_dashboard_refresh_at"] = _iso_now(now)
+    save_runtime_status(status, path)
+    return status
+
+
 def _decision_snapshot_payload(plan):
     return {
         "risk_mode": plan.get("risk_mode", "unknown"),
@@ -195,6 +295,7 @@ def refresh_dashboard():
         subprocess.run(["python", "generate_dashboard.py"], check=True, capture_output=True, text=True)
         if DASHBOARD_AUTO_PUBLISH:
             subprocess.run(["python", "publish_dashboard.py"], check=True, capture_output=True, text=True)
+        return True
     except subprocess.CalledProcessError as e:
         logger.error(
             "Dashboard refresh error: command=%s returncode=%s stdout=%s stderr=%s",
@@ -205,6 +306,7 @@ def refresh_dashboard():
         )
     except Exception as e:
         logger.error(f"Dashboard refresh error: {e}")
+    return False
 
 
 def _sum_trade_field(order, field):
@@ -841,6 +943,7 @@ def main():
     while True:
         try:
             logger.info("\n--- 리밸런싱 사이클 시작 ---")
+            mark_cycle_started()
 
             recent_performance = load_recent_performance()
             state = load_bot_state()
@@ -880,12 +983,21 @@ def main():
                 logger.info("Entry rejections: %s", json.dumps(plan["entry_rejections"], ensure_ascii=False))
             decision_history_changed = append_decision_history(plan)
             trade_history_changed = execute_rebalance_plan(upbit, plan, state)
-            if decision_history_changed or trade_history_changed:
-                refresh_dashboard()
+
+            sleep_seconds = seconds_until_next_cycle()
+            next_expected_cycle_at = datetime.fromtimestamp(time.time() + sleep_seconds).astimezone().isoformat(
+                timespec="seconds"
+            )
+            runtime_status = mark_cycle_succeeded(next_expected_cycle_at=next_expected_cycle_at)
+            heartbeat_due = should_refresh_dashboard_for_heartbeat(runtime_status)
+            if decision_history_changed or trade_history_changed or heartbeat_due:
+                if heartbeat_due and not (decision_history_changed or trade_history_changed):
+                    logger.info("Hourly dashboard heartbeat due. Refreshing dashboard.")
+                if refresh_dashboard():
+                    mark_dashboard_refreshed()
             else:
                 logger.info("Decision/trade history unchanged. Skipping dashboard refresh.")
 
-            sleep_seconds = seconds_until_next_cycle()
             logger.info(
                 "--- 리밸런싱 완료. 다음 %s초 경계 이후 %s초 버퍼까지 %s초 대기합니다. ---",
                 LOOP_SLEEP_SECONDS,
@@ -898,6 +1010,11 @@ def main():
             time.sleep(sleep_seconds)
         except Exception as e:
             logger.error(f"Main Loop Error: {e}")
+            runtime_status = mark_cycle_failed(e)
+            if should_refresh_dashboard_for_heartbeat(runtime_status):
+                logger.info("Hourly dashboard heartbeat due after error. Refreshing dashboard.")
+                if refresh_dashboard():
+                    mark_dashboard_refreshed()
             time.sleep(300)
 
 

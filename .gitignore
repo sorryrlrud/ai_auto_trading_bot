@@ -9,4 +9,5 @@ trading.log
 bot_state.json
 trade_history.json
 decision_history.json
+runtime_status.json
 .DS_Store

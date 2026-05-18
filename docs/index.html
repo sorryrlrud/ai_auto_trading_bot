@@ -73,6 +73,44 @@
       margin: 28px 0 12px;
       font-size: 18px;
     }
+    .runtime-card {
+      display: grid;
+      gap: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .runtime-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .runtime-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--muted);
+      flex: 0 0 auto;
+    }
+    .runtime-dot.healthy { background: var(--green); }
+    .runtime-dot.delayed { background: #facc15; }
+    .runtime-dot.suspicious { background: var(--red); }
+    .runtime-state {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .runtime-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .runtime-meta {
+      display: grid;
+      gap: 4px;
+      font-size: 14px;
+    }
     .decision-grid {
       display: grid;
       gap: 12px;
@@ -145,6 +183,9 @@
       .stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
+      .runtime-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
       .table-wrap {
         overflow-x: auto;
       }
@@ -187,6 +228,35 @@
       </article>
     </section>
 
+    <h2 class="section-title">운영 상태</h2>
+    <section class="runtime-card">
+      <div class="runtime-head">
+        <span class="runtime-dot" id="runtime-dot"></span>
+        <div>
+          <div class="runtime-state" id="runtime-state"></div>
+          <div class="muted" id="runtime-summary"></div>
+        </div>
+      </div>
+      <div class="runtime-grid">
+        <div class="runtime-meta">
+          <div class="label">마지막 성공 사이클</div>
+          <div id="runtime-last-success"></div>
+        </div>
+        <div class="runtime-meta">
+          <div class="label">마지막 완료 사이클</div>
+          <div id="runtime-last-completed"></div>
+        </div>
+        <div class="runtime-meta">
+          <div class="label">다음 예상 사이클</div>
+          <div id="runtime-next-cycle"></div>
+        </div>
+        <div class="runtime-meta">
+          <div class="label">최근 오류</div>
+          <div id="runtime-last-error"></div>
+        </div>
+      </div>
+    </section>
+
     <h2 class="section-title">최근 판단 로그</h2>
     <section class="decision-grid" id="decision-cards"></section>
     <div class="empty" id="decision-empty" hidden>아직 공개할 판단 로그가 없습니다.</div>
@@ -211,7 +281,7 @@
     </section>
   </main>
 
-  <script id="dashboard-data" type="application/json">{"summary": {"trade_count": 7, "win_rate": 14.29, "amount_trade_count": 7, "total_profit_krw": -918.78, "avg_profit_pct": -1.1866, "total_return_pct": -1.0844, "generated_at": "2026-05-18T14:46:24+09:00"}, "trades": [{"executed_at": "2026-05-17T10:10:04+00:00", "ticker": "KRW-USDT", "profit_pct": 0.2868, "profit_krw": 40.39, "cost_basis_krw": 14086.21, "gross_proceeds_krw": 14133.68, "fee_krw": 7.07, "reason": "BTC 방어장세 및 개별 추세 훼손", "source": "order_detail"}, {"executed_at": "2026-05-17T14:44:04+00:00", "ticker": "KRW-DOGE", "profit_pct": -0.6521, "profit_krw": -92.17, "cost_basis_krw": 14133.97, "gross_proceeds_krw": 14048.83, "fee_krw": 7.02, "reason": "손실 -1.2% 및 단기 추세 훼손", "source": "order_detail"}, {"executed_at": "2026-05-18T03:58:28+09:00", "ticker": "KRW-BORA", "profit_pct": -0.5982, "profit_krw": -31.5, "cost_basis_krw": 5266.53, "gross_proceeds_krw": 5237.65, "fee_krw": 2.62, "reason": "손실 -0.73% 및 단기 추세 훼손", "source": "order_detail"}, {"executed_at": "2026-05-18T05:51:22+09:00", "ticker": "KRW-ATOM", "profit_pct": -0.5689, "profit_krw": -109.62, "cost_basis_krw": 19269.17, "gross_proceeds_krw": 19169.14, "fee_krw": 9.58, "reason": "BTC 방어장세 및 개별 추세 훼손", "source": "order_detail"}, {"executed_at": "2026-05-18T06:55:59+09:00", "ticker": "KRW-FF", "profit_pct": -1.5307, "profit_krw": -147.24, "cost_basis_krw": 9618.66, "gross_proceeds_krw": 9476.17, "fee_krw": 4.74, "reason": "손실 -1.48% 및 단기 추세 훼손", "source": "order_detail"}, {"executed_at": "2026-05-18T08:48:53+09:00", "ticker": "KRW-AKT", "profit_pct": -2.8591, "profit_krw": -275.01, "cost_basis_krw": 9618.66, "gross_proceeds_krw": 9348.33, "fee_krw": 4.67, "reason": "손실 -2.72%로 손절 기준 도달", "source": "order_detail"}, {"executed_at": "2026-05-18T09:46:27+09:00", "ticker": "KRW-KAITO", "profit_pct": -2.384, "profit_krw": -303.63, "cost_basis_krw": 12736.0, "gross_proceeds_krw": 12438.59, "fee_krw": 6.22, "reason": "손실 -2.34%로 손절 기준 도달", "source": "order_detail"}], "recent_decisions": [{"recorded_at": "2026-05-18T14:16:24+09:00", "risk_mode": "defensive", "cash_reserve_pct": 80, "buy_threshold": 12.5, "buy_budget_krw": 12738.0, "entry_block_reason": "BTC 방어장세에서는 신규 매수 차단", "decisions": []}, {"recorded_at": "2026-05-18T14:31:24+09:00", "risk_mode": "defensive", "cash_reserve_pct": 80, "buy_threshold": 12.5, "buy_budget_krw": 12738.0, "entry_block_reason": "BTC 방어장세에서는 신규 매수 차단", "decisions": []}, {"recorded_at": "2026-05-18T14:46:24+09:00", "risk_mode": "defensive", "cash_reserve_pct": 80, "buy_threshold": 12.5, "buy_budget_krw": 12738.0, "entry_block_reason": "BTC 방어장세에서는 신규 매수 차단", "decisions": []}]}</script>
+  <script id="dashboard-data" type="application/json">{"summary": {"trade_count": 52, "win_rate": 32.69, "amount_trade_count": 2, "total_profit_krw": -124.1, "avg_profit_pct": -0.0825, "total_return_pct": -0.9637, "generated_at": "2026-05-18T20:04:58+09:00"}, "trades": [{"executed_at": "04-11 23:17", "ticker": "KRW-F", "profit_pct": -0.25, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-11 23:23", "ticker": "KRW-ETH", "profit_pct": -0.09, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-11 23:29", "ticker": "KRW-BLAST", "profit_pct": 0.41, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-11 23:32", "ticker": "KRW-ETH", "profit_pct": -0.15, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-11 23:42", "ticker": "KRW-F", "profit_pct": -0.25, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 00:06", "ticker": "KRW-ID", "profit_pct": -2.04, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 05:42", "ticker": "KRW-ID", "profit_pct": -2.04, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 07:49", "ticker": "KRW-ID", "profit_pct": -2.04, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 09:16", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 09:41", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 09:56", "ticker": "KRW-ID", "profit_pct": -1.92, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 10:12", "ticker": "KRW-ID", "profit_pct": 1.96, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 11:43", "ticker": "KRW-ID", "profit_pct": 1.96, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 12:19", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 12:39", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 13:00", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 13:40", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 13:56", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 14:06", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 14:16", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 14:36", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 14:47", "ticker": "KRW-ID", "profit_pct": 2.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 15:32", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 15:48", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 15:58", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 16:08", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 16:18", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 16:44", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 16:59", "ticker": "KRW-ID", "profit_pct": 1.96, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 17:14", "ticker": "KRW-ID", "profit_pct": 1.96, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 18:30", "ticker": "KRW-ID", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 19:52", "ticker": "KRW-ID", "profit_pct": -1.96, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-12 20:27", "ticker": "KRW-ID", "profit_pct": -4.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 08:05", "ticker": "KRW-0G", "profit_pct": 0.22, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 08:25", "ticker": "KRW-0G", "profit_pct": 0.86, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 08:51", "ticker": "KRW-0G", "profit_pct": 0.22, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 09:37", "ticker": "KRW-ID", "profit_pct": 2.04, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 10:13", "ticker": "KRW-0G", "profit_pct": 0.32, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 10:43", "ticker": "KRW-ID", "profit_pct": -2.04, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 11:49", "ticker": "KRW-0G", "profit_pct": 0.54, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 12:15", "ticker": "KRW-0G", "profit_pct": 1.54, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 13:31", "ticker": "KRW-0G", "profit_pct": -2.06, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 14:43", "ticker": "KRW-0G", "profit_pct": 0.54, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 14:53", "ticker": "KRW-0G", "profit_pct": -0.11, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 15:54", "ticker": "KRW-0G", "profit_pct": -0.22, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 16:20", "ticker": "KRW-0G", "profit_pct": 0.76, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 17:06", "ticker": "KRW-0G", "profit_pct": 0.0, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 17:47", "ticker": "KRW-0G", "profit_pct": -2.27, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 19:18", "ticker": "KRW-0G", "profit_pct": 1.22, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "04-13 22:02", "ticker": "KRW-0G", "profit_pct": 0.57, "profit_krw": null, "cost_basis_krw": null, "gross_proceeds_krw": null, "fee_krw": null, "reason": "", "source": "legacy"}, {"executed_at": "2026-05-17T12:36:46+00:00", "ticker": "KRW-HBAR", "profit_pct": -0.7796, "profit_krw": -50.59, "cost_basis_krw": 6489.39, "gross_proceeds_krw": 6442.02, "fee_krw": 3.22, "reason": "손실 -0.73% 및 단기 추세 훼손", "source": "order_detail"}, {"executed_at": "2026-05-17T14:09:13+00:00", "ticker": "KRW-ETC", "profit_pct": -1.1508, "profit_krw": -73.51, "cost_basis_krw": 6387.9, "gross_proceeds_krw": 6317.55, "fee_krw": 3.16, "reason": "손실 -1.1% 및 단기 추세 훼손", "source": "order_detail"}], "recent_decisions": [], "runtime_status": {}}</script>
   <script>
     const data = JSON.parse(document.getElementById("dashboard-data").textContent);
     const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
@@ -222,6 +292,56 @@
 
     document.getElementById("generated-at").textContent =
       `마지막 갱신 ${data.summary.generated_at}`;
+
+    const runtime = data.runtime_status || {};
+    const parseDate = (value) => value ? new Date(value) : null;
+    const formatValue = (value) => value || "-";
+    const generatedAt = parseDate(data.summary.generated_at);
+    const lastSuccessAt = parseDate(runtime.last_success_at);
+    const lastErrorAt = parseDate(runtime.last_error_at);
+    const heartbeatSeconds = Number(runtime.heartbeat_publish_interval_seconds || 3600);
+    const loopSeconds = Number(runtime.loop_interval_seconds || 900);
+    const freshLimitSeconds = heartbeatSeconds + loopSeconds;
+    const staleLimitSeconds = heartbeatSeconds * 2 + loopSeconds;
+    const pageAgeSeconds = generatedAt ? Math.max((Date.now() - generatedAt.getTime()) / 1000, 0) : Infinity;
+    const successLagAtGenerationSeconds =
+      generatedAt && lastSuccessAt ? Math.max((generatedAt.getTime() - lastSuccessAt.getTime()) / 1000, 0) : Infinity;
+
+    let runtimeTone = "";
+    let runtimeState = "확인 불가";
+    let runtimeSummary = "운영 상태 파일이 아직 생성되지 않았습니다.";
+    if (lastSuccessAt) {
+      const unrecoveredError = lastErrorAt && lastErrorAt > lastSuccessAt;
+      if (unrecoveredError) {
+        runtimeTone = "delayed";
+        runtimeState = "오류 이후 성공 미확인";
+        runtimeSummary = "최근 오류 이후 정상 완료가 아직 확인되지 않았습니다.";
+      } else if (pageAgeSeconds > staleLimitSeconds) {
+        runtimeTone = "suspicious";
+        runtimeState = "정지 또는 게시 실패 의심";
+        runtimeSummary = "공개 heartbeat가 두 주기 이상 갱신되지 않았습니다.";
+      } else if (pageAgeSeconds > freshLimitSeconds || successLagAtGenerationSeconds > loopSeconds * 2) {
+        runtimeTone = "delayed";
+        runtimeState = "갱신 지연";
+        runtimeSummary = "마지막 공개 heartbeat가 예상보다 늦습니다.";
+      } else {
+        runtimeTone = "healthy";
+        runtimeState = "최근 정상 확인";
+        runtimeSummary = "최근 공개 heartbeat 기준으로 봇이 정상 완료되었습니다.";
+      }
+    }
+    const runtimeDot = document.getElementById("runtime-dot");
+    if (runtimeTone) {
+      runtimeDot.classList.add(runtimeTone);
+    }
+    document.getElementById("runtime-state").textContent = runtimeState;
+    document.getElementById("runtime-summary").textContent = runtimeSummary;
+    document.getElementById("runtime-last-success").textContent = formatValue(runtime.last_success_at);
+    document.getElementById("runtime-last-completed").textContent = formatValue(runtime.last_cycle_completed_at);
+    document.getElementById("runtime-next-cycle").textContent = formatValue(runtime.next_expected_cycle_at);
+    document.getElementById("runtime-last-error").textContent = runtime.last_error_at
+      ? `${runtime.last_error_at}${runtime.last_error_type ? ` · ${runtime.last_error_type}` : ""}`
+      : "없음";
 
     const statMap = [
       ["total-profit", signedWon(data.summary.total_profit_krw), data.summary.total_profit_krw],
@@ -273,6 +393,13 @@
           const item = document.createElement("div");
           item.className = "muted";
           item.textContent = `신규 진입 차단: ${entry.entry_block_reason}`;
+          list.appendChild(item);
+        }
+        if (entry.entry_rejections?.length) {
+          const item = document.createElement("div");
+          item.className = "muted";
+          item.textContent =
+            `진입 후보 탈락: ${entry.entry_rejections.map((row) => `${row.ticker}(${row.reason})`).join(", ")}`;
           list.appendChild(item);
         }
         card.appendChild(list);

@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 import pandas as pd
@@ -180,6 +181,47 @@ class TestTradingLogic(unittest.TestCase):
         self.assertIn("publish_dashboard.py", joined)
         self.assertIn("publish stdout", joined)
         self.assertIn("publish stderr", joined)
+
+    def test_runtime_status_tracks_cycle_success_and_failure(self):
+        start = datetime(2026, 5, 18, 9, 0, tzinfo=timezone.utc)
+        success = start + timedelta(minutes=1)
+        failure = success + timedelta(minutes=15)
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            autotrade.mark_cycle_started(path=f.name, now=start)
+            autotrade.mark_cycle_succeeded(
+                next_expected_cycle_at="2026-05-18T09:15:20+00:00",
+                path=f.name,
+                now=success,
+            )
+            autotrade.mark_cycle_failed(RuntimeError("boom"), path=f.name, now=failure)
+            status = autotrade.load_runtime_status(path=f.name)
+
+        self.assertEqual(datetime.fromisoformat(status["last_cycle_started_at"]), start.astimezone())
+        self.assertEqual(datetime.fromisoformat(status["last_success_at"]), success.astimezone())
+        self.assertEqual(status["next_expected_cycle_at"], "2026-05-18T09:15:20+00:00")
+        self.assertEqual(status["last_error_type"], "RuntimeError")
+        self.assertEqual(status["consecutive_failures"], 1)
+
+    def test_dashboard_heartbeat_refresh_waits_for_interval(self):
+        refreshed_at = datetime(2026, 5, 18, 9, 0, tzinfo=timezone.utc)
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            autotrade.mark_dashboard_refreshed(path=f.name, now=refreshed_at)
+            status = autotrade.load_runtime_status(path=f.name)
+
+        self.assertFalse(
+            autotrade.should_refresh_dashboard_for_heartbeat(
+                status,
+                now=refreshed_at + timedelta(minutes=59),
+                interval_seconds=3600,
+            )
+        )
+        self.assertTrue(
+            autotrade.should_refresh_dashboard_for_heartbeat(
+                status,
+                now=refreshed_at + timedelta(hours=1),
+                interval_seconds=3600,
+            )
+        )
 
     def test_stop_loss_generates_sell_without_ai(self):
         holding = {

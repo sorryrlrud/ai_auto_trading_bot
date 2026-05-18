@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 TRADE_HISTORY_FILE = ROOT / "trade_history.json"
 DECISION_HISTORY_FILE = ROOT / "decision_history.json"
+RUNTIME_STATUS_FILE = ROOT / "runtime_status.json"
 DASHBOARD_FILE = ROOT / "docs" / "index.html"
 
 
@@ -55,6 +56,14 @@ def load_recent_decisions(path=DECISION_HISTORY_FILE, limit=3):
     return rows[-limit:]
 
 
+def load_runtime_status(path=RUNTIME_STATUS_FILE):
+    try:
+        status = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        status = {}
+    return status if isinstance(status, dict) else {}
+
+
 def summarize(trades):
     amount_rows = [row for row in trades if row["profit_krw"] is not None and row["cost_basis_krw"]]
     total_profit_krw = sum(row["profit_krw"] for row in amount_rows)
@@ -72,10 +81,15 @@ def summarize(trades):
     }
 
 
-def build_html(trades, recent_decisions):
+def build_html(trades, recent_decisions, runtime_status):
     summary = summarize(trades)
     payload = json.dumps(
-        {"summary": summary, "trades": trades, "recent_decisions": recent_decisions},
+        {
+            "summary": summary,
+            "trades": trades,
+            "recent_decisions": recent_decisions,
+            "runtime_status": runtime_status,
+        },
         ensure_ascii=False,
     )
     return f"""<!doctype html>
@@ -153,6 +167,44 @@ def build_html(trades, recent_decisions):
       margin: 28px 0 12px;
       font-size: 18px;
     }}
+    .runtime-card {{
+      display: grid;
+      gap: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }}
+    .runtime-head {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }}
+    .runtime-dot {{
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--muted);
+      flex: 0 0 auto;
+    }}
+    .runtime-dot.healthy {{ background: var(--green); }}
+    .runtime-dot.delayed {{ background: #facc15; }}
+    .runtime-dot.suspicious {{ background: var(--red); }}
+    .runtime-state {{
+      font-size: 18px;
+      font-weight: 700;
+    }}
+    .runtime-grid {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }}
+    .runtime-meta {{
+      display: grid;
+      gap: 4px;
+      font-size: 14px;
+    }}
     .decision-grid {{
       display: grid;
       gap: 12px;
@@ -225,6 +277,9 @@ def build_html(trades, recent_decisions):
       .stats {{
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }}
+      .runtime-grid {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }}
       .table-wrap {{
         overflow-x: auto;
       }}
@@ -267,6 +322,35 @@ def build_html(trades, recent_decisions):
       </article>
     </section>
 
+    <h2 class="section-title">운영 상태</h2>
+    <section class="runtime-card">
+      <div class="runtime-head">
+        <span class="runtime-dot" id="runtime-dot"></span>
+        <div>
+          <div class="runtime-state" id="runtime-state"></div>
+          <div class="muted" id="runtime-summary"></div>
+        </div>
+      </div>
+      <div class="runtime-grid">
+        <div class="runtime-meta">
+          <div class="label">마지막 성공 사이클</div>
+          <div id="runtime-last-success"></div>
+        </div>
+        <div class="runtime-meta">
+          <div class="label">마지막 완료 사이클</div>
+          <div id="runtime-last-completed"></div>
+        </div>
+        <div class="runtime-meta">
+          <div class="label">다음 예상 사이클</div>
+          <div id="runtime-next-cycle"></div>
+        </div>
+        <div class="runtime-meta">
+          <div class="label">최근 오류</div>
+          <div id="runtime-last-error"></div>
+        </div>
+      </div>
+    </section>
+
     <h2 class="section-title">최근 판단 로그</h2>
     <section class="decision-grid" id="decision-cards"></section>
     <div class="empty" id="decision-empty" hidden>아직 공개할 판단 로그가 없습니다.</div>
@@ -302,6 +386,56 @@ def build_html(trades, recent_decisions):
 
     document.getElementById("generated-at").textContent =
       `마지막 갱신 ${{data.summary.generated_at}}`;
+
+    const runtime = data.runtime_status || {{}};
+    const parseDate = (value) => value ? new Date(value) : null;
+    const formatValue = (value) => value || "-";
+    const generatedAt = parseDate(data.summary.generated_at);
+    const lastSuccessAt = parseDate(runtime.last_success_at);
+    const lastErrorAt = parseDate(runtime.last_error_at);
+    const heartbeatSeconds = Number(runtime.heartbeat_publish_interval_seconds || 3600);
+    const loopSeconds = Number(runtime.loop_interval_seconds || 900);
+    const freshLimitSeconds = heartbeatSeconds + loopSeconds;
+    const staleLimitSeconds = heartbeatSeconds * 2 + loopSeconds;
+    const pageAgeSeconds = generatedAt ? Math.max((Date.now() - generatedAt.getTime()) / 1000, 0) : Infinity;
+    const successLagAtGenerationSeconds =
+      generatedAt && lastSuccessAt ? Math.max((generatedAt.getTime() - lastSuccessAt.getTime()) / 1000, 0) : Infinity;
+
+    let runtimeTone = "";
+    let runtimeState = "확인 불가";
+    let runtimeSummary = "운영 상태 파일이 아직 생성되지 않았습니다.";
+    if (lastSuccessAt) {{
+      const unrecoveredError = lastErrorAt && lastErrorAt > lastSuccessAt;
+      if (unrecoveredError) {{
+        runtimeTone = "delayed";
+        runtimeState = "오류 이후 성공 미확인";
+        runtimeSummary = "최근 오류 이후 정상 완료가 아직 확인되지 않았습니다.";
+      }} else if (pageAgeSeconds > staleLimitSeconds) {{
+        runtimeTone = "suspicious";
+        runtimeState = "정지 또는 게시 실패 의심";
+        runtimeSummary = "공개 heartbeat가 두 주기 이상 갱신되지 않았습니다.";
+      }} else if (pageAgeSeconds > freshLimitSeconds || successLagAtGenerationSeconds > loopSeconds * 2) {{
+        runtimeTone = "delayed";
+        runtimeState = "갱신 지연";
+        runtimeSummary = "마지막 공개 heartbeat가 예상보다 늦습니다.";
+      }} else {{
+        runtimeTone = "healthy";
+        runtimeState = "최근 정상 확인";
+        runtimeSummary = "최근 공개 heartbeat 기준으로 봇이 정상 완료되었습니다.";
+      }}
+    }}
+    const runtimeDot = document.getElementById("runtime-dot");
+    if (runtimeTone) {{
+      runtimeDot.classList.add(runtimeTone);
+    }}
+    document.getElementById("runtime-state").textContent = runtimeState;
+    document.getElementById("runtime-summary").textContent = runtimeSummary;
+    document.getElementById("runtime-last-success").textContent = formatValue(runtime.last_success_at);
+    document.getElementById("runtime-last-completed").textContent = formatValue(runtime.last_cycle_completed_at);
+    document.getElementById("runtime-next-cycle").textContent = formatValue(runtime.next_expected_cycle_at);
+    document.getElementById("runtime-last-error").textContent = runtime.last_error_at
+      ? `${{runtime.last_error_at}}${{runtime.last_error_type ? ` · ${{runtime.last_error_type}}` : ""}}`
+      : "없음";
 
     const statMap = [
       ["total-profit", signedWon(data.summary.total_profit_krw), data.summary.total_profit_krw],
@@ -396,8 +530,9 @@ def build_html(trades, recent_decisions):
 def main():
     trades = load_realized_trades()
     recent_decisions = load_recent_decisions()
+    runtime_status = load_runtime_status()
     DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
-    DASHBOARD_FILE.write_text(build_html(trades, recent_decisions), encoding="utf-8")
+    DASHBOARD_FILE.write_text(build_html(trades, recent_decisions, runtime_status), encoding="utf-8")
     print(f"Wrote {DASHBOARD_FILE}")
 
 

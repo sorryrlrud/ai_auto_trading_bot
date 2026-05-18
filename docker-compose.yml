@@ -14,6 +14,7 @@ services:
       RUN_ONCE: "${RUN_ONCE:-false}"
       LOOP_SLEEP_SECONDS: "${LOOP_SLEEP_SECONDS:-900}"
       DASHBOARD_AUTO_PUBLISH: "${DASHBOARD_AUTO_PUBLISH:-false}"
+      DASHBOARD_HEARTBEAT_PUBLISH_SECONDS: "${DASHBOARD_HEARTBEAT_PUBLISH_SECONDS:-3600}"
     volumes:
       - .:/app
       - ${HOME}/.ssh:/host-ssh:ro

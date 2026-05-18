@@ -19,7 +19,7 @@ To expose the page through GitHub Pages:
 3. Set the source to `Deploy from a branch`.
 4. Select branch `main` and folder `/docs`.
 
-The bot regenerates `docs/index.html` after every rebalance cycle so the recent-decision section stays current. Publishing updates to GitHub Pages still requires pushing the changed `docs/index.html` file to the repository.
+The bot regenerates `docs/index.html` after decision/trade changes and also emits an operational heartbeat at most once per hour by default so the public page can show whether the bot was recently seen alive without exposing a VM port. Publishing updates to GitHub Pages still requires pushing the changed `docs/index.html` file to the repository.
 
 For automatic publishing from the VM:
 
@@ -27,7 +27,7 @@ For automatic publishing from the VM:
 2. Change the VM remote to the SSH form: `git@github.com:sorryrlrud/ai_auto_trading_bot.git`.
 3. Set `DASHBOARD_AUTO_PUBLISH=true` in the VM `.env`.
 
-When enabled, the bot regenerates the dashboard, commits only `docs/index.html`, and pushes it after each rebalance cycle that changes the page.
+When enabled, the bot regenerates the dashboard, commits only `docs/index.html`, and pushes it after each decision/trade change plus the hourly heartbeat refresh controlled by `DASHBOARD_HEARTBEAT_PUBLISH_SECONDS` (default `3600`).
 
 The container timezone defaults to `Asia/Seoul` through `TZ`, so log timestamps and dashboard generation timestamps use KST by default.
 Automatic publishing expects the host SSH configuration to be available at `${HOME}/.ssh`; the Compose service mounts it read-only at `/host-ssh`, and the entrypoint copies the deploy key/config into the bot user's home with SSH-safe permissions before starting the bot.

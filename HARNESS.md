@@ -55,11 +55,12 @@ docker exec quant-ai-bot date
 - Important runtime files:
   - `trade_history.json`
   - `decision_history.json`
+  - `runtime_status.json`
   - `bot_state.json`
   - `trading.log`
   - `docs/index.html`
 
-`decision_history.json`, `trade_history.json`, `bot_state.json`, and `trading.log` are runtime data files and should not be committed.
+`decision_history.json`, `trade_history.json`, `runtime_status.json`, `bot_state.json`, and `trading.log` are runtime data files and should not be committed.
 
 ## Current dashboard behavior
 
@@ -68,11 +69,13 @@ docker exec quant-ai-bot date
   - recent rebalance decisions from `decision_history.json`
 - The dashboard now shows:
   - realized PnL summary
+  - public operational status based on the latest published heartbeat
   - realized sell history
   - the latest three decision snapshots
 - Decision snapshots include `entry_block_reason` when new buys are intentionally blocked, so an empty buy list in defensive mode is explainable from the dashboard payload.
 - When non-defensive entries are rejected by hard filters, the latest top rejected candidates are stored as `entry_rejections` for later tuning.
-- `autotrade.py` now refreshes the dashboard after every rebalance cycle, not only after sells.
+- `autotrade.py` refreshes the dashboard after decision/trade changes plus a bounded hourly heartbeat, not only after completed sells.
+- When there are no decision/trade changes, `autotrade.py` refreshes the dashboard heartbeat at most once per hour by default (`DASHBOARD_HEARTBEAT_PUBLISH_SECONDS=3600`) so GitHub Pages can show the latest known-alive status without opening an inbound VM port.
 - With `DASHBOARD_AUTO_PUBLISH=true`, the bot commits only `docs/index.html` and pushes it to `main`.
 
 Because dashboard publishing creates commits automatically, local `main` can fall behind remote `main` during active bot operation. Before pushing source changes, use:
