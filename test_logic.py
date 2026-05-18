@@ -7,6 +7,7 @@ from unittest import mock
 import pandas as pd
 
 import autotrade
+import generate_dashboard
 
 
 def sample_market_row(ticker="KRW-ETH", **overrides):
@@ -69,11 +70,11 @@ class TestTradingLogic(unittest.TestCase):
         with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
             json.dump(
                 [
-                    {"ticker": "KRW-A", "profit": -2.0},
-                    {"ticker": "KRW-B", "profit": -1.0},
-                    {"ticker": "KRW-C", "profit": 0.5},
-                    {"ticker": "KRW-D", "profit": -0.5},
-                    {"ticker": "KRW-E", "profit": -1.2},
+                    {"side": "SELL", "ticker": "KRW-A", "profit": -2.0},
+                    {"side": "SELL", "ticker": "KRW-B", "profit": -1.0},
+                    {"side": "SELL", "ticker": "KRW-C", "profit": 0.5},
+                    {"side": "SELL", "ticker": "KRW-D", "profit": -0.5},
+                    {"side": "SELL", "ticker": "KRW-E", "profit": -1.2},
                 ],
                 f,
             )
@@ -91,6 +92,7 @@ class TestTradingLogic(unittest.TestCase):
             json.dump(
                 [
                     {"side": "BUY", "profit_pct": 99.0},
+                    {"ticker": "KRW-LEGACY", "profit": 88.0},
                     {"side": "SELL", "profit_pct": 1.5},
                     {"side": "SELL", "profit_pct": -0.5},
                 ],
@@ -102,6 +104,28 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(perf["count"], 2)
         self.assertEqual(perf["avg_profit"], 0.5)
         self.assertEqual(perf["net_profit"], 1.0)
+
+    def test_dashboard_ignores_ambiguous_legacy_trade_rows(self):
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            json.dump(
+                [
+                    {"date": "04-13 22:02", "ticker": "KRW-0G", "profit": 0.57},
+                    {
+                        "executed_at": "2026-05-18T09:46:27+09:00",
+                        "side": "SELL",
+                        "ticker": "KRW-KAITO",
+                        "profit_krw": -303.63,
+                        "cost_basis_krw": 12736.0,
+                        "profit_pct": -2.384,
+                    },
+                ],
+                f,
+            )
+            f.flush()
+            trades = generate_dashboard.load_realized_trades(path=generate_dashboard.Path(f.name))
+
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["ticker"], "KRW-KAITO")
 
     def test_sell_history_record_uses_order_detail(self):
         decision = {

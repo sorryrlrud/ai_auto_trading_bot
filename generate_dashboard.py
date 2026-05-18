@@ -27,7 +27,10 @@ def load_realized_trades(path=TRADE_HISTORY_FILE):
 
     trades = []
     for row in rows:
-        if row.get("side", "SELL") != "SELL":
+        # Only publish records produced by the current realized-sell pipeline.
+        # Older ad-hoc rows may contain a date/ticker/profit field but do not
+        # prove that a live sell was actually executed.
+        if row.get("side") != "SELL":
             continue
         trades.append(
             {

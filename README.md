@@ -10,7 +10,7 @@ Rule-based Upbit trading bot with a static realized-performance dashboard.
 python3 generate_dashboard.py
 ```
 
-The dashboard shows completed sell-side trades plus the latest three rebalance decision snapshots. Open positions, balances, and secrets are not published.
+The dashboard shows only explicit completed sell-side trades (`side="SELL"`) plus the latest three rebalance decision snapshots. Ambiguous legacy rows that merely have a date/ticker/profit field are ignored so stale local history cannot inflate the public totals. Open positions, balances, and secrets are not published.
 
 To expose the page through GitHub Pages:
 

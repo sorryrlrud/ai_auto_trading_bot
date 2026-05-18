@@ -121,7 +121,10 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
     except (FileNotFoundError, json.JSONDecodeError):
         rows = []
 
-    realized_rows = [row for row in rows if row.get("side", "SELL") == "SELL"]
+    # Ignore ambiguous legacy rows that predate explicit order-side tracking.
+    # Without an explicit SELL marker, a row is not safe to use as realized
+    # performance input for the live strategy.
+    realized_rows = [row for row in rows if row.get("side") == "SELL"]
     recent = realized_rows[-limit:]
     profits = [safe_float(row.get("profit_pct", row.get("profit"))) for row in recent]
     losses = [p for p in profits if p < 0]
