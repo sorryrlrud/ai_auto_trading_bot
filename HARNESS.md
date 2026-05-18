@@ -71,6 +71,7 @@ docker exec quant-ai-bot date
   - realized sell history
   - the latest three decision snapshots
 - Decision snapshots include `entry_block_reason` when new buys are intentionally blocked, so an empty buy list in defensive mode is explainable from the dashboard payload.
+- When non-defensive entries are rejected by hard filters, the latest top rejected candidates are stored as `entry_rejections` for later tuning.
 - `autotrade.py` now refreshes the dashboard after every rebalance cycle, not only after sells.
 - With `DASHBOARD_AUTO_PUBLISH=true`, the bot commits only `docs/index.html` and pushes it to `main`.
 
@@ -215,8 +216,11 @@ Do not force-push over dashboard commits unless there is a deliberate reason.
 - Entry indicators are calculated from completed candles only; the latest in-progress daily, 1-hour, and 15-minute candles are excluded before RSI/MACD/MA calculations.
 - With the current default `ALLOW_DEFENSIVE_BUYS=false`, `risk_mode=defensive` blocks all new entries while still managing existing holdings.
 - Candidate entries are hard-blocked when the long-term trend is not aligned, the 1-hour or 15-minute trend is not aligned, the market is overheated, the move is too extended, or `atr_pct` exceeds `MAX_ENTRY_ATR_PCT` (default `12.0`).
+- Stablecoin-like entry candidates are excluded by default through `EXCLUDED_ENTRY_TICKERS=KRW-USDT,KRW-USDC,KRW-USD1`.
+- The top-volume target scan batches the full KRW market list instead of checking only an initial slice of tickers.
 - Small losing positions are no longer sold on a 15-minute break alone; early loss exits require both 15-minute and 1-hour trend damage unless a harder stop-loss or other broader exit rule is hit.
 - The rebalance loop now aligns to `LOOP_SLEEP_SECONDS` boundaries with a `CANDLE_CLOSE_BUFFER_SECONDS` delay (default `20`) instead of sleeping a flat interval after each cycle. With the default 900-second loop this targets the first moments after each 15-minute candle close.
+- Consecutive identical decision snapshots are deduplicated, so repeated no-op defensive cycles do not keep creating dashboard commits.
 
 ### 5. Historical container-side Git commits left root-owned `.git` objects
 

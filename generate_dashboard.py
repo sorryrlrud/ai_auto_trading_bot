@@ -355,6 +355,13 @@ def build_html(trades, recent_decisions):
           item.textContent = `신규 진입 차단: ${{entry.entry_block_reason}}`;
           list.appendChild(item);
         }}
+        if (entry.entry_rejections?.length) {{
+          const item = document.createElement("div");
+          item.className = "muted";
+          item.textContent =
+            `진입 후보 탈락: ${{entry.entry_rejections.map((row) => `${{row.ticker}}(${{row.reason}})`).join(", ")}}`;
+          list.appendChild(item);
+        }}
         card.appendChild(list);
         decisionCards.appendChild(card);
       }}

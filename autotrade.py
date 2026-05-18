@@ -38,6 +38,12 @@ TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
 CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20"))
 MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "12.0"))
 ALLOW_DEFENSIVE_BUYS = os.getenv("ALLOW_DEFENSIVE_BUYS", "false").lower() == "true"
+EXCLUDED_ENTRY_TICKERS = {
+    ticker.strip()
+    for ticker in os.getenv("EXCLUDED_ENTRY_TICKERS", "KRW-USDT,KRW-USDC,KRW-USD1").split(",")
+    if ticker.strip()
+}
+MAX_RECORDED_ENTRY_REJECTIONS = int(os.getenv("MAX_RECORDED_ENTRY_REJECTIONS", "5"))
 TRADE_ENABLED = os.getenv("TRADE_ENABLED", "false").lower() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() == "true"
 DASHBOARD_AUTO_PUBLISH = os.getenv("DASHBOARD_AUTO_PUBLISH", "false").lower() == "true"
@@ -147,22 +153,41 @@ def load_decision_history(path=DECISION_HISTORY_FILE):
     return rows if isinstance(rows, list) else []
 
 
+def _decision_snapshot_payload(plan):
+    return {
+        "risk_mode": plan.get("risk_mode", "unknown"),
+        "cash_reserve_pct": plan.get("cash_reserve_pct"),
+        "buy_threshold": plan.get("buy_threshold"),
+        "buy_budget_krw": plan.get("buy_budget_krw"),
+        "entry_block_reason": plan.get("entry_block_reason"),
+        "entry_rejections": plan.get("entry_rejections", []),
+        "decisions": plan.get("decisions", []),
+    }
+
+
+def _decision_snapshot_signature(row):
+    return {
+        "risk_mode": row.get("risk_mode", "unknown"),
+        "cash_reserve_pct": row.get("cash_reserve_pct"),
+        "buy_threshold": row.get("buy_threshold"),
+        "buy_budget_krw": row.get("buy_budget_krw"),
+        "entry_block_reason": row.get("entry_block_reason"),
+        "entry_rejections": row.get("entry_rejections", []),
+        "decisions": row.get("decisions", []),
+    }
+
+
 def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=20):
     rows = load_decision_history(path)
-    rows.append(
-        {
-            "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "risk_mode": plan.get("risk_mode", "unknown"),
-            "cash_reserve_pct": plan.get("cash_reserve_pct"),
-            "buy_threshold": plan.get("buy_threshold"),
-            "buy_budget_krw": plan.get("buy_budget_krw"),
-            "entry_block_reason": plan.get("entry_block_reason"),
-            "decisions": plan.get("decisions", []),
-        }
-    )
+    payload = _decision_snapshot_payload(plan)
+    if rows and _decision_snapshot_signature(rows[-1]) == payload:
+        return False
+
+    rows.append({"recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"), **payload})
     rows = rows[-keep:]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=2)
+    return True
 
 
 def refresh_dashboard():
@@ -406,13 +431,22 @@ def get_current_holdings(upbit):
     return holdings
 
 
+def _chunks(items, size):
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
 def get_top_volume_targets(limit=25):
     all_krw = pyupbit.get_tickers(fiat="KRW")
-    markets = ",".join(all_krw[:90])
-    response = requests.get("https://api.upbit.com/v1/ticker", params={"markets": markets}, timeout=10)
-    response.raise_for_status()
-    rows = response.json()
-    return [row["market"] for row in sorted(rows, key=lambda x: x["acc_trade_price_24h"], reverse=True)[:limit]]
+    rows = []
+    for chunk in _chunks(all_krw, 100):
+        response = requests.get("https://api.upbit.com/v1/ticker", params={"markets": ",".join(chunk)}, timeout=10)
+        response.raise_for_status()
+        rows.extend(response.json())
+        _sleep_api()
+
+    eligible = [row for row in rows if row["market"] not in EXCLUDED_ENTRY_TICKERS]
+    return [row["market"] for row in sorted(eligible, key=lambda x: x["acc_trade_price_24h"], reverse=True)[:limit]]
 
 
 def cash_reserve_pct(market_context, recent_performance):
@@ -451,6 +485,8 @@ def entry_block_reason(data, market_context):
     hour = data["indicators"]["1h"]
     minute = data["indicators"]["15m"]
 
+    if data["coin"] in EXCLUDED_ENTRY_TICKERS:
+        return "전략 제외 종목"
     if market_context.get("risk_mode") == "defensive" and not ALLOW_DEFENSIVE_BUYS:
         return "BTC 방어장세에서는 신규 매수 차단"
     if data["atr_pct"] > MAX_ENTRY_ATR_PCT:
@@ -635,6 +671,7 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
     reserve_pct = cash_reserve_pct(market_context, recent_performance)
     threshold = buy_score_threshold(market_context, recent_performance)
     decisions = []
+    entry_rejections = []
     entry_gate = None
     if market_context.get("risk_mode") == "defensive" and not ALLOW_DEFENSIVE_BUYS:
         entry_gate = "BTC 방어장세에서는 신규 매수 차단"
@@ -675,6 +712,9 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
             continue
         rejected = entry_gate or entry_block_reason(row, market_context)
         if rejected:
+            if not entry_gate:
+                score, _ = score_coin(row, market_context)
+                entry_rejections.append({"ticker": ticker, "score": score, "reason": rejected})
             continue
         score, reason = score_coin(row, market_context)
         if score >= threshold:
@@ -691,12 +731,16 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
             }
         )
 
+    entry_rejections.sort(key=lambda x: x["score"], reverse=True)
+    entry_rejections = entry_rejections[:MAX_RECORDED_ENTRY_REJECTIONS]
+
     return {
         "decisions": decisions,
         "cash_reserve_pct": reserve_pct,
         "buy_threshold": round(threshold, 2),
         "buy_budget_krw": round(buy_budget_krw, 0),
         "entry_block_reason": entry_gate,
+        "entry_rejections": entry_rejections,
         "risk_mode": market_context.get("risk_mode", "unknown"),
         "krw": krw,
     }
@@ -714,7 +758,9 @@ def execute_rebalance_plan(upbit, plan, state=None):
     decisions = plan.get("decisions", [])
     if not decisions:
         logger.info("No decisions to execute.")
-        return
+        return False
+
+    trade_history_changed = False
 
     for decision in decisions:
         if decision["decision"] != "SELL":
@@ -735,6 +781,7 @@ def execute_rebalance_plan(upbit, plan, state=None):
                 order = upbit.get_order(result["uuid"])
                 record = build_sell_history_record(decision, order)
                 append_trade_history(record)
+                trade_history_changed = True
                 logger.info(
                     "[REALIZED] %s profit=%s KRW (%s%%)",
                     ticker,
@@ -770,6 +817,7 @@ def execute_rebalance_plan(upbit, plan, state=None):
     for decision in decisions:
         if decision["decision"] == "HOLD":
             logger.info(f"[HOLD] {decision['ticker']} | {decision['reason']}")
+    return trade_history_changed
 
 
 def main():
@@ -820,9 +868,14 @@ def main():
                 int(plan["buy_budget_krw"]),
                 json.dumps(plan["decisions"], ensure_ascii=False),
             )
-            append_decision_history(plan)
-            execute_rebalance_plan(upbit, plan, state)
-            refresh_dashboard()
+            if plan["entry_rejections"]:
+                logger.info("Entry rejections: %s", json.dumps(plan["entry_rejections"], ensure_ascii=False))
+            decision_history_changed = append_decision_history(plan)
+            trade_history_changed = execute_rebalance_plan(upbit, plan, state)
+            if decision_history_changed or trade_history_changed:
+                refresh_dashboard()
+            else:
+                logger.info("Decision/trade history unchanged. Skipping dashboard refresh.")
 
             sleep_seconds = seconds_until_next_cycle()
             logger.info(

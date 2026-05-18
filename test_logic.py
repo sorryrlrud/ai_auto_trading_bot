@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest import mock
 
 import pandas as pd
 
@@ -147,6 +148,22 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(rows[0]["buy_budget_krw"], 10001)
         self.assertEqual(rows[1]["decisions"][0]["ticker"], "KRW-2")
 
+    def test_decision_history_skips_identical_snapshot(self):
+        plan = {
+            "risk_mode": "defensive",
+            "cash_reserve_pct": 80,
+            "buy_threshold": 12.5,
+            "buy_budget_krw": 10000,
+            "entry_block_reason": "BTC 방어장세에서는 신규 매수 차단",
+            "decisions": [],
+        }
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            self.assertTrue(autotrade.append_decision_history(plan, path=f.name))
+            self.assertFalse(autotrade.append_decision_history(plan, path=f.name))
+            rows = autotrade.load_decision_history(path=f.name)
+
+        self.assertEqual(len(rows), 1)
+
     def test_stop_loss_generates_sell_without_ai(self):
         holding = {
             "ticker": "KRW-ETH",
@@ -239,6 +256,47 @@ class TestTradingLogic(unittest.TestCase):
             now_ts=now_ts,
         )
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+    def test_excluded_entry_ticker_is_not_bought(self):
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-USDT")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+        self.assertEqual(plan["entry_rejections"][0]["reason"], "전략 제외 종목")
+
+    def test_top_volume_targets_batches_all_markets_and_excludes_stables(self):
+        markets = [f"KRW-{index}" for index in range(205)] + ["KRW-USDT", "KRW-USDC", "KRW-USD1"]
+
+        class FakeResponse:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._rows
+
+        def fake_get(_url, params, timeout):
+            chunk = params["markets"].split(",")
+            rows = [{"market": ticker, "acc_trade_price_24h": index} for index, ticker in enumerate(chunk, start=1)]
+            for row in rows:
+                if row["market"] in {"KRW-USDT", "KRW-USDC", "KRW-USD1"}:
+                    row["acc_trade_price_24h"] = 10_000
+            return FakeResponse(rows)
+
+        with mock.patch.object(autotrade.pyupbit, "get_tickers", return_value=markets), mock.patch.object(
+            autotrade.requests, "get", side_effect=fake_get
+        ) as requests_get, mock.patch.object(autotrade, "_sleep_api"):
+            result = autotrade.get_top_volume_targets(limit=5)
+
+        self.assertEqual(requests_get.call_count, 3)
+        self.assertFalse({"KRW-USDT", "KRW-USDC", "KRW-USD1"} & set(result))
+        self.assertEqual(len(result), 5)
 
     def test_defensive_mode_blocks_new_buys(self):
         plan = autotrade.build_rebalance_plan(
