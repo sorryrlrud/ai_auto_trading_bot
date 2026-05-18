@@ -192,9 +192,17 @@ def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=20):
 
 def refresh_dashboard():
     try:
-        subprocess.run(["python", "generate_dashboard.py"], check=True)
+        subprocess.run(["python", "generate_dashboard.py"], check=True, capture_output=True, text=True)
         if DASHBOARD_AUTO_PUBLISH:
-            subprocess.run(["python", "publish_dashboard.py"], check=True)
+            subprocess.run(["python", "publish_dashboard.py"], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(
+            "Dashboard refresh error: command=%s returncode=%s stdout=%s stderr=%s",
+            e.cmd,
+            e.returncode,
+            (e.stdout or "").strip() or "-",
+            (e.stderr or "").strip() or "-",
+        )
     except Exception as e:
         logger.error(f"Dashboard refresh error: {e}")
 

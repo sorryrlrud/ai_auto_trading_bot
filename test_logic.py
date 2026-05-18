@@ -164,6 +164,23 @@ class TestTradingLogic(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
 
+    def test_dashboard_refresh_logs_subprocess_diagnostics(self):
+        error = autotrade.subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["python", "publish_dashboard.py"],
+            output="publish stdout",
+            stderr="publish stderr",
+        )
+        with mock.patch.object(autotrade.subprocess, "run", side_effect=error), self.assertLogs(
+            autotrade.logger, level="ERROR"
+        ) as logs:
+            autotrade.refresh_dashboard()
+
+        joined = "\n".join(logs.output)
+        self.assertIn("publish_dashboard.py", joined)
+        self.assertIn("publish stdout", joined)
+        self.assertIn("publish stderr", joined)
+
     def test_stop_loss_generates_sell_without_ai(self):
         holding = {
             "ticker": "KRW-ETH",

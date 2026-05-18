@@ -221,6 +221,7 @@ Do not force-push over dashboard commits unless there is a deliberate reason.
 - Small losing positions are no longer sold on a 15-minute break alone; early loss exits require both 15-minute and 1-hour trend damage unless a harder stop-loss or other broader exit rule is hit.
 - The rebalance loop now aligns to `LOOP_SLEEP_SECONDS` boundaries with a `CANDLE_CLOSE_BUFFER_SECONDS` delay (default `20`) instead of sleeping a flat interval after each cycle. With the default 900-second loop this targets the first moments after each 15-minute candle close.
 - Consecutive identical decision snapshots are deduplicated, so repeated no-op defensive cycles do not keep creating dashboard commits.
+- Dashboard refresh subprocess failures now log command, return code, stdout, and stderr so future publish regressions are diagnosable from `trading.log`.
 
 ### 5. Historical container-side Git commits left root-owned `.git` objects
 
