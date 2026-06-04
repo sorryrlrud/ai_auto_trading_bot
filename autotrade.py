@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from datetime import datetime, timedelta
+from functools import wraps
 
 import pandas as pd
 import pandas_ta as ta  # registers the df.ta accessor
@@ -28,6 +29,7 @@ MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
 API_CALL_SLEEP_SECONDS = float(os.getenv("API_CALL_SLEEP_SECONDS", "0.12"))
+UPBIT_HTTP_TIMEOUT_SECONDS = float(os.getenv("UPBIT_HTTP_TIMEOUT_SECONDS", "10"))
 MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "3"))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-2.2"))
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "3.2"))
@@ -52,6 +54,30 @@ TRADE_HISTORY_FILE = "trade_history.json"
 DECISION_HISTORY_FILE = "decision_history.json"
 BOT_STATE_FILE = "bot_state.json"
 RUNTIME_STATUS_FILE = "runtime_status.json"
+
+_ORIGINAL_REQUESTS_METHODS = {name: getattr(requests, name) for name in ("get", "post", "delete")}
+
+
+def _with_default_timeout(method, timeout_seconds):
+    @wraps(method)
+    def wrapper(*args, **kwargs):
+        kwargs.setdefault("timeout", timeout_seconds)
+        return method(*args, **kwargs)
+
+    return wrapper
+
+
+def configure_http_timeouts(timeout_seconds=UPBIT_HTTP_TIMEOUT_SECONDS):
+    if timeout_seconds <= 0:
+        for name, method in _ORIGINAL_REQUESTS_METHODS.items():
+            setattr(requests, name, method)
+        return
+
+    for name, method in _ORIGINAL_REQUESTS_METHODS.items():
+        setattr(requests, name, _with_default_timeout(method, timeout_seconds))
+
+
+configure_http_timeouts()
 
 
 def safe_float(value, default=0.0):

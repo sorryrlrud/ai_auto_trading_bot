@@ -247,6 +247,21 @@ class TestTradingLogic(unittest.TestCase):
             )
         )
 
+    def test_default_http_timeout_is_added_to_wrapped_requests(self):
+        calls = []
+
+        def fake_request(*args, **kwargs):
+            calls.append(kwargs)
+            return "ok"
+
+        wrapped = autotrade._with_default_timeout(fake_request, timeout_seconds=7)
+
+        self.assertEqual(wrapped("https://example.test"), "ok")
+        self.assertEqual(calls[-1]["timeout"], 7)
+
+        wrapped("https://example.test", timeout=3)
+        self.assertEqual(calls[-1]["timeout"], 3)
+
     def test_stop_loss_generates_sell_without_ai(self):
         holding = {
             "ticker": "KRW-ETH",
