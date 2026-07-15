@@ -74,6 +74,7 @@ docker exec quant-ai-bot date
   - realized sell history
   - the latest three decision snapshots
 - Realized-performance aggregation only accepts rows with explicit `side="SELL"` so legacy local rows without order-side evidence are ignored.
+- New entries store their exact paid buy fee in `bot_state.json`; realized PnL and the dashboard subtract both buy and sell fees.
 - Decision snapshots include `entry_block_reason` when new buys are intentionally blocked, so an empty buy list in defensive mode is explainable from the dashboard payload.
 - When non-defensive entries are rejected by hard filters, the latest top rejected candidates are stored as `entry_rejections` for later tuning.
 - `autotrade.py` refreshes the dashboard after decision/trade changes plus a bounded hourly heartbeat, not only after completed sells.

@@ -40,6 +40,8 @@ def load_realized_trades(path=TRADE_HISTORY_FILE):
                 "profit_krw": safe_float(row["profit_krw"]) if "profit_krw" in row else None,
                 "cost_basis_krw": safe_float(row["cost_basis_krw"]) if "cost_basis_krw" in row else None,
                 "gross_proceeds_krw": safe_float(row["gross_proceeds_krw"]) if "gross_proceeds_krw" in row else None,
+                "buy_fee_krw": safe_float(row["buy_fee_krw"]) if "buy_fee_krw" in row else None,
+                "sell_fee_krw": safe_float(row["sell_fee_krw"]) if "sell_fee_krw" in row else None,
                 "fee_krw": safe_float(row["fee_krw"]) if "fee_krw" in row else None,
                 "reason": row.get("reason", ""),
                 "source": row.get("source", "legacy"),
@@ -72,7 +74,7 @@ def summarize(trades):
     total_profit_krw = sum(row["profit_krw"] for row in amount_rows)
     pct_rows = [row["profit_pct"] for row in trades]
     won = [value for value in pct_rows if value > 0]
-    cost_basis = sum(row["cost_basis_krw"] for row in amount_rows)
+    cost_basis = sum(row["cost_basis_krw"] + (row.get("buy_fee_krw") or 0.0) for row in amount_rows)
     return {
         "trade_count": len(trades),
         "win_rate": round(len(won) / len(trades) * 100, 2) if trades else 0.0,

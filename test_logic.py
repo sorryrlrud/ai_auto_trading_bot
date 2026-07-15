@@ -182,6 +182,151 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(record["profit_pct"], 9.945)
         self.assertEqual(record["source"], "order_detail")
 
+    def test_sell_history_record_includes_prorated_buy_fee(self):
+        decision = {
+            "ticker": "KRW-ETH",
+            "balance": 2,
+            "avg_buy_price": 1000,
+            "current_price": 1100,
+            "profit_pct": 10.0,
+            "reason": "test",
+        }
+        order = {
+            "paid_fee": "1.1",
+            "trades": [
+                {"volume": "1.0", "funds": "1100"},
+                {"volume": "1.0", "funds": "1100"},
+            ],
+        }
+        entry_state = {"entry_volume": 4, "entry_fee_krw": 2}
+
+        record = autotrade.build_sell_history_record(decision, order, entry_state=entry_state)
+
+        self.assertEqual(record["buy_fee_krw"], 1.0)
+        self.assertEqual(record["sell_fee_krw"], 1.1)
+        self.assertEqual(record["fee_krw"], 2.1)
+        self.assertEqual(record["profit_krw"], 197.9)
+        self.assertEqual(record["profit_pct"], round(197.9 / 2001 * 100, 4))
+
+    def test_buy_state_record_uses_order_detail(self):
+        record = autotrade.build_buy_state_record(
+            {
+                "paid_fee": "1.5",
+                "trades": [
+                    {"volume": "1.0", "funds": "1000"},
+                    {"volume": "2.0", "funds": "2000"},
+                ],
+            }
+        )
+
+        self.assertEqual(record["entry_volume"], 3.0)
+        self.assertEqual(record["entry_funds_krw"], 3000.0)
+        self.assertEqual(record["entry_fee_krw"], 1.5)
+
+    def test_execute_buy_persists_entry_fee_details(self):
+        class FakeUpbit:
+            def get_balance(self, currency):
+                self.requested_balance = currency
+                return 10000
+
+            def buy_market_order(self, ticker, amount):
+                self.buy = (ticker, amount)
+                return {"uuid": "buy-order"}
+
+            def get_order(self, order_id):
+                self.order_id = order_id
+                return {
+                    "paid_fee": "4.98",
+                    "trades": [{"volume": "5", "funds": "9950"}],
+                }
+
+        upbit = FakeUpbit()
+        state = {"trades": {}}
+        plan = {
+            "decisions": [{"ticker": "KRW-ETH", "decision": "BUY", "reason": "test"}],
+            "buy_budget_krw": 10000,
+            "cash_reserve_pct": 25,
+        }
+
+        with mock.patch.object(autotrade, "TRADE_ENABLED", True), mock.patch.object(
+            autotrade, "save_bot_state"
+        ), mock.patch.object(autotrade.time, "sleep"):
+            autotrade.execute_rebalance_plan(upbit, plan, state)
+
+        entry = state["trades"]["KRW-ETH"]
+        self.assertEqual(upbit.order_id, "buy-order")
+        self.assertEqual(entry["entry_volume"], 5.0)
+        self.assertEqual(entry["entry_funds_krw"], 9950.0)
+        self.assertEqual(entry["entry_fee_krw"], 4.98)
+
+    def test_execute_sell_uses_and_clears_entry_fee_details(self):
+        class FakeUpbit:
+            def get_balance(self, currency):
+                return 5 if currency == "ETH" else 10000
+
+            def sell_market_order(self, ticker, balance):
+                return {"uuid": "sell-order"}
+
+            def get_order(self, order_id):
+                return {
+                    "paid_fee": "2.75",
+                    "trades": [{"volume": "5", "funds": "5500"}],
+                }
+
+        state = {
+            "trades": {
+                "KRW-ETH": {
+                    "last_buy_ts": 1,
+                    "entry_volume": 5,
+                    "entry_funds_krw": 5000,
+                    "entry_fee_krw": 2.5,
+                }
+            }
+        }
+        plan = {
+            "decisions": [
+                {
+                    "ticker": "KRW-ETH",
+                    "decision": "SELL",
+                    "balance": 5,
+                    "avg_buy_price": 1000,
+                    "current_price": 1100,
+                    "profit_pct": 10,
+                    "reason": "test",
+                }
+            ],
+            "buy_budget_krw": 0,
+            "cash_reserve_pct": 25,
+        }
+
+        with mock.patch.object(autotrade, "TRADE_ENABLED", True), mock.patch.object(
+            autotrade.pyupbit, "get_current_price", return_value=1100
+        ), mock.patch.object(autotrade, "save_bot_state"), mock.patch.object(
+            autotrade, "append_trade_history"
+        ) as append_history, mock.patch.object(autotrade.time, "sleep"):
+            changed = autotrade.execute_rebalance_plan(FakeUpbit(), plan, state)
+
+        record = append_history.call_args.args[0]
+        self.assertTrue(changed)
+        self.assertEqual(record["buy_fee_krw"], 2.5)
+        self.assertEqual(record["fee_krw"], 5.25)
+        self.assertNotIn("entry_fee_krw", state["trades"]["KRW-ETH"])
+        self.assertIn("last_sell_ts", state["trades"]["KRW-ETH"])
+
+    def test_dashboard_total_return_uses_buy_fee_in_invested_capital(self):
+        summary = generate_dashboard.summarize(
+            [
+                {
+                    "profit_krw": -101.0,
+                    "profit_pct": -10.0899,
+                    "cost_basis_krw": 1000.0,
+                    "buy_fee_krw": 1.0,
+                }
+            ]
+        )
+
+        self.assertEqual(summary["total_return_pct"], round(-101 / 1001 * 100, 4))
+
     def test_decision_history_keeps_latest_entries(self):
         with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
             for index in range(3):

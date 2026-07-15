@@ -54,6 +54,7 @@ TRADE_HISTORY_FILE = "trade_history.json"
 DECISION_HISTORY_FILE = "decision_history.json"
 BOT_STATE_FILE = "bot_state.json"
 RUNTIME_STATUS_FILE = "runtime_status.json"
+ENTRY_STATE_FIELDS = ("entry_volume", "entry_funds_krw", "entry_fee_krw")
 
 _ORIGINAL_REQUESTS_METHODS = {name: getattr(requests, name) for name in ("get", "post", "delete")}
 
@@ -343,16 +344,32 @@ def _sum_trade_field(order, field):
     return sum(safe_float(trade.get(field)) for trade in trades if isinstance(trade, dict))
 
 
-def build_sell_history_record(decision, order=None):
+def build_buy_state_record(order=None):
     order = order if isinstance(order, dict) else {}
+    return {
+        "entry_volume": round(_sum_trade_field(order, "volume") or safe_float(order.get("executed_volume")), 12),
+        "entry_funds_krw": round(_sum_trade_field(order, "funds"), 8),
+        "entry_fee_krw": round(safe_float(order.get("paid_fee")), 8),
+    }
+
+
+def build_sell_history_record(decision, order=None, entry_state=None):
+    order = order if isinstance(order, dict) else {}
+    entry_state = entry_state if isinstance(entry_state, dict) else {}
     executed_volume = _sum_trade_field(order, "volume") or safe_float(decision.get("balance"))
     gross_proceeds = _sum_trade_field(order, "funds") or executed_volume * safe_float(decision.get("current_price"))
-    fee_krw = safe_float(order.get("paid_fee"))
+    sell_fee_krw = safe_float(order.get("paid_fee"))
+    buy_fee_krw = safe_float(entry_state.get("entry_fee_krw"))
+    entry_volume = safe_float(entry_state.get("entry_volume"))
+    if buy_fee_krw and entry_volume and executed_volume:
+        buy_fee_krw *= min(executed_volume / entry_volume, 1.0)
+    fee_krw = buy_fee_krw + sell_fee_krw
     avg_buy_price = safe_float(decision.get("avg_buy_price"))
     avg_sell_price = gross_proceeds / executed_volume if executed_volume else safe_float(decision.get("current_price"))
     cost_basis = executed_volume * avg_buy_price
     profit_krw = gross_proceeds - fee_krw - cost_basis
-    profit_pct = (profit_krw / cost_basis * 100) if cost_basis else safe_float(decision.get("profit_pct"))
+    invested_krw = cost_basis + buy_fee_krw
+    profit_pct = (profit_krw / invested_krw * 100) if invested_krw else safe_float(decision.get("profit_pct"))
 
     return {
         "executed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -363,6 +380,8 @@ def build_sell_history_record(decision, order=None):
         "avg_sell_price": round(avg_sell_price, 8),
         "cost_basis_krw": round(cost_basis, 2),
         "gross_proceeds_krw": round(gross_proceeds, 2),
+        "buy_fee_krw": round(buy_fee_krw, 2),
+        "sell_fee_krw": round(sell_fee_krw, 2),
         "fee_krw": round(fee_krw, 2),
         "profit_krw": round(profit_krw, 2),
         "profit_pct": round(profit_pct, 4),
@@ -915,10 +934,14 @@ def execute_rebalance_plan(upbit, plan, state=None):
             logger.info(f"[SELL] {ticker} | {decision['reason']}")
             result = upbit.sell_market_order(ticker, balance)
             if result and "uuid" in result:
-                state["trades"].setdefault(ticker, {})["last_sell_ts"] = time.time()
+                trade_state = state["trades"].setdefault(ticker, {})
+                entry_state = dict(trade_state)
+                trade_state["last_sell_ts"] = time.time()
+                for field in ENTRY_STATE_FIELDS:
+                    trade_state.pop(field, None)
                 save_bot_state(state)
                 order = upbit.get_order(result["uuid"])
-                record = build_sell_history_record(decision, order)
+                record = build_sell_history_record(decision, order, entry_state=entry_state)
                 append_trade_history(record)
                 trade_history_changed = True
                 logger.info(
@@ -947,8 +970,15 @@ def execute_rebalance_plan(upbit, plan, state=None):
             result = upbit.buy_market_order(decision["ticker"], amount_per_coin)
             if result and "uuid" in result:
                 logger.info(f"[BUY] {decision['ticker']} {int(amount_per_coin)} KRW | {decision['reason']}")
-                state["trades"].setdefault(decision["ticker"], {})["last_buy_ts"] = time.time()
+                trade_state = state["trades"].setdefault(decision["ticker"], {})
+                trade_state["last_buy_ts"] = time.time()
                 save_bot_state(state)
+                try:
+                    order = upbit.get_order(result["uuid"])
+                    trade_state.update(build_buy_state_record(order))
+                    save_bot_state(state)
+                except Exception as e:
+                    logger.warning("[BUY DETAIL ERROR] %s: %s", decision["ticker"], e)
             else:
                 logger.error(f"[BUY FAILED] {decision['ticker']} : {result}")
             time.sleep(1)
