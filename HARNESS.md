@@ -100,7 +100,8 @@ cd /home/sorryrlrud/ai_auto_trading_bot
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 docker logs --tail 120 quant-ai-bot
 docker exec quant-ai-bot date
-docker exec quant-ai-bot sh -lc 'cd /app && git ls-remote origin HEAD | head -1'
+docker exec --user 1001:1002 --env HOME=/tmp/bot-home quant-ai-bot \
+  sh -lc 'cd /app && git ls-remote origin HEAD | head -1'
 git status --short
 git log --oneline -5
 ```
@@ -271,7 +272,7 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 6. On the VM, pull the source change and recreate the container carefully.
 7. Verify:
    - container time is KST
-   - `git ls-remote origin HEAD` works inside the container
+   - `git ls-remote origin HEAD` works as the bot user with `HOME=/tmp/bot-home` inside the container
    - dashboard auto-publish succeeds on a real rebalance cycle
    - `recent_decisions` remains populated
    - host-side `git pull --ff-only origin main` still succeeds after an automatic dashboard commit
