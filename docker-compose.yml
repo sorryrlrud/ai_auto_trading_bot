@@ -2,6 +2,7 @@ services:
   coin-bot:
     build: .
     container_name: quant-ai-bot
+    init: true
     restart: always
     environment:
       HOME: "/tmp/bot-home"

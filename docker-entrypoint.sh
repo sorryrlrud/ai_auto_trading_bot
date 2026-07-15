@@ -34,6 +34,10 @@ chown -R "$BOT_UID:$BOT_GID" "$HOME"
 
 setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
   env HOME="$HOME" git config --global --add safe.directory /app
+setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
+  env HOME="$HOME" git config --global maintenance.autoDetach false
+setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
+  env HOME="$HOME" git config --global gc.autoDetach false
 
 exec setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
   env HOME="$HOME" python -u autotrade.py

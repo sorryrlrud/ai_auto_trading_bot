@@ -8,6 +8,7 @@ import pandas as pd
 
 import autotrade
 import generate_dashboard
+import publish_dashboard
 
 
 def sample_market_row(ticker="KRW-ETH", **overrides):
@@ -58,6 +59,35 @@ def sample_market_row(ticker="KRW-ETH", **overrides):
 
 
 class TestTradingLogic(unittest.TestCase):
+    def test_dashboard_publisher_retries_pending_commit_before_new_commit(self):
+        with mock.patch.object(publish_dashboard, "pending_commit_count", return_value=1), mock.patch.object(
+            publish_dashboard, "has_dashboard_changes", return_value=True
+        ), mock.patch.object(publish_dashboard, "run") as run:
+            publish_dashboard.main()
+
+        self.assertEqual(
+            run.call_args_list,
+            [
+                mock.call("git", "push", "origin", "main"),
+                mock.call("git", "add", publish_dashboard.DASHBOARD_PATH),
+                mock.call("git", "commit", "-m", "Update trading dashboard"),
+                mock.call("git", "push", "origin", "main"),
+            ],
+        )
+
+    def test_dashboard_publisher_does_not_commit_when_pending_push_fails(self):
+        error = publish_dashboard.subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["git", "push", "origin", "main"],
+        )
+        with mock.patch.object(publish_dashboard, "pending_commit_count", return_value=1), mock.patch.object(
+            publish_dashboard, "run", side_effect=error
+        ) as run:
+            with self.assertRaises(publish_dashboard.subprocess.CalledProcessError):
+                publish_dashboard.main()
+
+        self.assertEqual(run.call_args_list, [mock.call("git", "push", "origin", "main")])
+
     def test_upbit_error_payload_is_reported_cleanly(self):
         class ErrorUpbit:
             def get_balances(self):

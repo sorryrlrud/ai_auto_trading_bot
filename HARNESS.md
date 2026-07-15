@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-05-18 KST
+Last verified: 2026-07-15 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -44,6 +44,7 @@ Do not commit `.env`, deploy keys, or private SSH material. The Compose service 
 
 - Source code is bind-mounted from the VM repository into the container at `/app`.
 - The bot runs from `docker-compose.yml` as service `coin-bot`.
+- Compose enables `init: true`, so Docker's init process is PID 1 and reaps detached Git maintenance children.
 - The entrypoint starts as root only long enough to prepare SSH and create a lightweight bot user, then runs the Python bot as `BOT_UID:BOT_GID`, currently `1001:1002` on the GCP VM, to match the host repository owner.
 - The container timezone is intended to be KST through `TZ=Asia/Seoul`.
 - The VM host itself may still report UTC; check the container if the task concerns bot timestamps:
@@ -78,6 +79,7 @@ docker exec quant-ai-bot date
 - `autotrade.py` refreshes the dashboard after decision/trade changes plus a bounded hourly heartbeat, not only after completed sells.
 - When there are no decision/trade changes, `autotrade.py` refreshes the dashboard heartbeat at most once per hour by default (`DASHBOARD_HEARTBEAT_PUBLISH_SECONDS=3600`) so GitHub Pages can show the latest known-alive status without opening an inbound VM port.
 - With `DASHBOARD_AUTO_PUBLISH=true`, the bot commits only `docs/index.html` and pushes it to `main`.
+- If a dashboard push fails after a commit, the next attempt pushes that pending commit before creating another one. This bounds commit growth during a publishing outage.
 
 Because dashboard publishing creates commits automatically, local `main` can fall behind remote `main` during active bot operation. Before pushing source changes, use:
 
@@ -245,6 +247,14 @@ git pull --ff-only origin main
 ```
 
 The entrypoint now drops the Python process to the host-compatible UID/GID, so new Git objects should be user-owned. Keep the recovery command above in mind for older root-owned objects that may still exist.
+
+## What happened on 2026-07-15
+
+- The trading loop was healthy and the container had run for five weeks without a restart, but dashboard publishing had stopped on 2026-07-08.
+- Detached Git maintenance processes were inherited by the Python process running as PID 1 and were never reaped. The container accumulated 677 `git`/`ssh` zombies and reached its cgroup task limit of 680.
+- Once the task limit was exhausted, dashboard pushes failed with `cannot fork() for maintenance` and `cannot fork() for ssh`. Because each failed attempt had already committed the new heartbeat, the VM branch grew to 660 unpublished dashboard commits.
+- Compose now enables Docker's init process, the entrypoint disables detached Git maintenance, and the dashboard publisher retries pending commits before creating another commit.
+- During recovery, preserve the incident history on an archive branch before realigning the VM `main` branch with `origin/main`; runtime JSON/log files are ignored and must remain in place.
 
 ## Safe operating sequence for future changes
 
