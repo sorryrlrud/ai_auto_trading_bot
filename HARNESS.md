@@ -65,14 +65,18 @@ docker exec quant-ai-bot date
 
 - The former always-running `coin-bot` service is behind the Compose
   `legacy-loop` profile and must remain stopped during scheduled operation.
-- Codex heartbeat execution calls local `run_scheduled_tick.sh`, which connects
+- A one-minute local Codex scheduled task calls `run_scheduled_tick.sh`, which connects
   to the VM and runs one `scheduled_trader.py` tick inside
   `quant-ai-manual-api` as UID/GID `1001:1002`.
+- The scheduled task is pinned to `gpt-5.6-sol` with `high` reasoning. When a
+  15-minute signal slot needs judgment, the model reads the token-bound JSON
+  context and pipes one constrained JSON decision to
+  `execute_llm_trade_decision.sh`.
 - `scheduled_trading_state.json` holds the 02:00 KST session baseline, current
   phase, last 15-minute signal slot, pause/completion state, and bounded event
   history. It is runtime data and must not be committed.
-- Every minute checks account-level estimated liquidation return. Strategy
-  scanning occurs only once per 15-minute slot.
+- Every minute checks account-level estimated liquidation return. Market
+  scanning and LLM judgment occur only once per 15-minute slot.
 - Phase thresholds are +1.0% and -0.75%. A pre-noon stop liquidates and waits
   for a phase-2 restart at 12:00; a stop at/after noon or a profit target ends
   trading until the next 02:00 session.

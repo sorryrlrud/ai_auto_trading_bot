@@ -1,7 +1,9 @@
 import argparse
+import base64
 import json
 import logging
 import os
+import secrets
 import sys
 from datetime import datetime, time as datetime_time, timedelta
 from pathlib import Path
@@ -16,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 KST = ZoneInfo("Asia/Seoul")
 STATE_FILE = Path(os.getenv("SCHEDULED_TRADING_STATE_FILE", "scheduled_trading_state.json"))
+LLM_CONTEXT_FILE = Path(os.getenv("SCHEDULED_LLM_CONTEXT_FILE", "scheduled_llm_context.json"))
 TRADE_ENABLED = os.getenv("SCHEDULED_TRADE_ENABLED", "false").lower() == "true"
 ACTIVATE_AT = os.getenv("SCHEDULED_ACTIVATE_AT", "").strip()
 START_HOUR = int(os.getenv("SCHEDULED_START_HOUR", "2"))
@@ -65,6 +68,21 @@ def save_state(state, path=STATE_FILE):
     path = Path(path)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
+def load_llm_context(path=LLM_CONTEXT_FILE):
+    try:
+        context = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    return context if isinstance(context, dict) else None
+
+
+def save_llm_context(context, path=LLM_CONTEXT_FILE):
+    path = Path(path)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
 
 
@@ -233,9 +251,15 @@ def complete_or_retry_liquidation(upbit, state, state_path, now, target_status, 
     }
 
 
-def run_signal_cycle(upbit, snapshot):
-    recent_performance = autotrade.load_recent_performance()
-    bot_state = autotrade.load_bot_state()
+def build_llm_context(
+    upbit,
+    snapshot,
+    state,
+    now,
+    slot,
+    state_path=STATE_FILE,
+    context_path=LLM_CONTEXT_FILE,
+):
     market_context = autotrade.get_market_context()
     targets = autotrade.get_top_volume_targets(limit=25)
     holding_tickers = [holding["ticker"] for holding in snapshot["holdings"]]
@@ -248,30 +272,179 @@ def run_signal_cycle(upbit, snapshot):
             market_data.append(data)
         autotrade._sleep_api()
 
-    plan = autotrade.build_rebalance_plan(
-        market_data=market_data,
-        market_context=market_context,
-        krw=snapshot["krw"],
-        current_holdings=snapshot["holdings"],
-        recent_performance=recent_performance,
-        state=bot_state,
-        cash_reserve_pct_override=0,
-    )
-    decision_history_changed = autotrade.append_decision_history(plan)
-    trade_history_changed = autotrade.execute_rebalance_plan(
-        upbit,
-        plan,
-        state=bot_state,
-        acquire_lock=False,
-        order_buffer=ORDER_BUFFER,
-        trade_enabled=TRADE_ENABLED,
-    )
-    if decision_history_changed or trade_history_changed:
-        autotrade.refresh_dashboard()
-    return plan
+    candidates = []
+    for row in market_data:
+        score, score_reason = autotrade.score_coin(row, market_context)
+        candidates.append(
+            {
+                **row,
+                "legacy_score": score,
+                "legacy_score_reason": score_reason,
+                "legacy_block_reason": autotrade.entry_block_reason(row, market_context),
+            }
+        )
+
+    decision_token = secrets.token_urlsafe(18)
+    context = {
+        "status": "needs_decision",
+        "decision_token": decision_token,
+        "generated_at": _iso(now),
+        "signal_slot": slot,
+        "session_date": state["session_date"],
+        "phase": state["phase"],
+        "phase_return_pct": state["phase_return_pct"],
+        "market_context": market_context,
+        "portfolio": {
+            "krw": round(snapshot["krw"], 2),
+            "asset_value_krw": round(snapshot["asset_value_krw"], 2),
+            "liquidation_equity_krw": round(snapshot["liquidation_equity_krw"], 2),
+            "holdings": snapshot["holdings"],
+        },
+        "candidates": candidates,
+        "constraints": {
+            "allowed_decisions": ["BUY", "SELL", "HOLD"],
+            "max_positions": autotrade.MAX_POSITIONS,
+            "cash_reserve_pct": 0,
+            "order_buffer": ORDER_BUFFER,
+            "buy_tickers_must_be_in_candidates": True,
+            "sell_tickers_must_be_current_holdings": True,
+            "one_decision_per_ticker": True,
+            "stablecoin_like_tickers_excluded": sorted(autotrade.EXCLUDED_ENTRY_TICKERS),
+        },
+        "required_decision_schema": {
+            "decision_token": "copy exactly",
+            "decisions": [
+                {
+                    "ticker": "KRW-BTC",
+                    "decision": "BUY|SELL|HOLD",
+                    "reason": "brief evidence-based reason",
+                }
+            ],
+        },
+    }
+    save_llm_context(context, context_path)
+    state["pending_decision_token"] = decision_token
+    state["pending_signal_slot"] = slot
+    save_state(state, state_path)
+    return context
 
 
-def run_tick(upbit=None, now=None, state_path=STATE_FILE):
+def _validated_llm_plan(decision, context, snapshot):
+    if not isinstance(decision, dict):
+        raise ValueError("LLM decision must be a JSON object")
+    if decision.get("decision_token") != context.get("decision_token"):
+        raise ValueError("LLM decision token does not match the pending context")
+    rows = decision.get("decisions")
+    if not isinstance(rows, list):
+        raise ValueError("LLM decisions must be a JSON array")
+
+    held_tickers = {holding["ticker"] for holding in snapshot["holdings"]}
+    candidate_tickers = {row["coin"] for row in context.get("candidates", [])}
+    normalized = []
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Each LLM decision must be a JSON object")
+        ticker = str(row.get("ticker", "")).strip().upper()
+        action = str(row.get("decision", "")).strip().upper()
+        reason = str(row.get("reason", "")).strip()[:500]
+        if ticker in seen:
+            raise ValueError(f"Duplicate LLM decision for {ticker}")
+        if action not in {"BUY", "SELL", "HOLD"}:
+            raise ValueError(f"Unsupported LLM decision {action!r}")
+        if not reason:
+            raise ValueError(f"LLM decision reason is required for {ticker}")
+        if action == "BUY" and (ticker not in candidate_tickers or ticker in held_tickers):
+            raise ValueError(f"BUY is not allowed for {ticker}")
+        if action == "SELL" and ticker not in held_tickers:
+            raise ValueError(f"SELL is not allowed for {ticker}")
+        if action == "HOLD" and ticker not in held_tickers:
+            raise ValueError(f"HOLD is only allowed for a current holding: {ticker}")
+        seen.add(ticker)
+        normalized.append({"ticker": ticker, "decision": action, "reason": f"GPT-5.6 Sol: {reason}"})
+
+    sell_tickers = {row["ticker"] for row in normalized if row["decision"] == "SELL"}
+    buy_rows = [row for row in normalized if row["decision"] == "BUY"]
+    remaining_positions = len(held_tickers - sell_tickers)
+    if remaining_positions + len(buy_rows) > autotrade.MAX_POSITIONS:
+        raise ValueError("LLM decision exceeds MAX_POSITIONS")
+
+    holding_by_ticker = {holding["ticker"]: holding for holding in snapshot["holdings"]}
+    for row in normalized:
+        holding = holding_by_ticker.get(row["ticker"])
+        if row["decision"] == "SELL" and holding:
+            row.update(
+                {
+                    "balance": holding["balance"],
+                    "avg_buy_price": holding["avg_buy_price"],
+                    "current_price": holding["current_price"],
+                    "profit_pct": holding["profit_pct"],
+                }
+            )
+    return {
+        "decisions": normalized,
+        "cash_reserve_pct": 0,
+        "buy_budget_krw": round(snapshot["krw"], 0),
+        "entry_block_reason": None,
+        "entry_rejections": [],
+        "risk_mode": context.get("market_context", {}).get("risk_mode", "unknown"),
+        "krw": snapshot["krw"],
+        "decision_source": "gpt-5.6-sol/high",
+    }
+
+
+def execute_llm_decision(decision, upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTEXT_FILE):
+    now = (now or datetime.now(KST)).astimezone(KST)
+    upbit = upbit or autotrade.setup_api()
+    if upbit is None:
+        raise RuntimeError("Upbit credentials are not configured")
+
+    with autotrade.trade_execution_lock():
+        state = load_state(state_path)
+        context = load_llm_context(context_path)
+        if not context:
+            raise RuntimeError("No pending LLM decision context")
+        if state.get("pending_decision_token") != context.get("decision_token"):
+            raise RuntimeError("Pending LLM context does not match scheduler state")
+        generated_at = _parse_iso(context.get("generated_at"))
+        if not generated_at or now - generated_at > timedelta(minutes=10):
+            raise RuntimeError("Pending LLM decision context is stale")
+
+        snapshot = account_snapshot(upbit)
+        current_return = phase_return_pct(snapshot, state)
+        if current_return >= TAKE_PROFIT_PCT or current_return <= -MAX_LOSS_PCT:
+            raise RuntimeError("Account threshold changed; run prepare tick again before executing an LLM decision")
+        plan = _validated_llm_plan(decision, context, snapshot)
+
+        # Consume the token before side effects so retries are at-most-once.
+        state["last_signal_slot"] = context["signal_slot"]
+        state["pending_decision_token"] = None
+        state["pending_signal_slot"] = None
+        save_state(state, state_path)
+
+        decision_history_changed = autotrade.append_decision_history(plan)
+        trade_history_changed = autotrade.execute_rebalance_plan(
+            upbit,
+            plan,
+            state=autotrade.load_bot_state(),
+            acquire_lock=False,
+            order_buffer=ORDER_BUFFER,
+            trade_enabled=TRADE_ENABLED,
+        )
+        decisions = [f"{row['decision']}:{row['ticker']}" for row in plan["decisions"]]
+        _record_event(state, now, "llm_signal_cycle", slot=context["signal_slot"], decisions=decisions)
+        save_state(state, state_path)
+        if decision_history_changed or trade_history_changed:
+            autotrade.refresh_dashboard()
+        return {
+            "status": "active",
+            "action": "llm_decision_executed",
+            "decision_source": "gpt-5.6-sol/high",
+            "decisions": decisions,
+        }
+
+
+def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTEXT_FILE):
     now = (now or datetime.now(KST)).astimezone(KST)
     activation = _parse_iso(ACTIVATE_AT)
     if activation and now < activation:
@@ -390,9 +563,6 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE):
                 "action": "heartbeat_only",
             }
 
-        # Persist the slot before orders so a retry is at-most-once if the process is interrupted.
-        state["last_signal_slot"] = slot
-        save_state(state, state_path)
         if not TRADE_ENABLED:
             return {
                 "status": "active_dry_run",
@@ -402,26 +572,31 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE):
                 "action": "signal_skipped",
             }
 
-        plan = run_signal_cycle(upbit, snapshot)
-        decisions = [f"{row['decision']}:{row['ticker']}" for row in plan.get("decisions", [])]
-        _record_event(state, now, "signal_cycle", slot=slot, decisions=decisions)
-        save_state(state, state_path)
-        return {
-            "status": "active",
-            "session_date": state["session_date"],
-            "phase": state["phase"],
-            "return_pct": round(return_pct, 4),
-            "action": "signal_cycle",
-            "decisions": decisions,
-        }
+        pending = load_llm_context(context_path)
+        if state.get("pending_signal_slot") == slot and pending:
+            return pending
+        return build_llm_context(
+            upbit,
+            snapshot,
+            state,
+            now,
+            slot,
+            state_path=state_path,
+            context_path=context_path,
+        )
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run one scheduled trading heartbeat tick")
     parser.add_argument("--json", action="store_true", help="Print a compact JSON result")
+    parser.add_argument("--decision-base64", help="Execute a base64-encoded GPT-5.6 Sol decision JSON")
     args = parser.parse_args()
     try:
-        result = run_tick()
+        if args.decision_base64:
+            decoded = base64.b64decode(args.decision_base64, validate=True).decode("utf-8")
+            result = execute_llm_decision(json.loads(decoded))
+        else:
+            result = run_tick()
         if args.json:
             print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         else:

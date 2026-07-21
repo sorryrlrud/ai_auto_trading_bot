@@ -33,13 +33,19 @@ class TestScheduledTrader(unittest.TestCase):
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary_directory.cleanup)
         self.state_path = Path(self.temporary_directory.name) / "state.json"
+        self.context_path = Path(self.temporary_directory.name) / "context.json"
         self.patches = [
             mock.patch.object(scheduled_trader, "ACTIVATE_AT", ""),
             mock.patch.object(scheduled_trader, "TRADE_ENABLED", True),
             mock.patch.object(scheduled_trader.pyupbit, "get_current_price", return_value=10_000),
             mock.patch.object(scheduled_trader.autotrade, "_sleep_api"),
             mock.patch.object(scheduled_trader.autotrade, "trade_execution_lock", mock.MagicMock()),
-            mock.patch.object(scheduled_trader, "run_signal_cycle", return_value={"decisions": []}),
+            mock.patch.object(
+                scheduled_trader.autotrade,
+                "get_market_context",
+                return_value={"risk_mode": "normal", "market_volatility": "normal"},
+            ),
+            mock.patch.object(scheduled_trader.autotrade, "get_top_volume_targets", return_value=[]),
         ]
         for patcher in self.patches:
             patcher.start()
@@ -53,9 +59,12 @@ class TestScheduledTrader(unittest.TestCase):
 
     def test_first_tick_sets_baseline_and_runs_one_signal_slot(self):
         now = datetime(2026, 7, 22, 2, 1, tzinfo=scheduled_trader.KST)
-        result = scheduled_trader.run_tick(FakeUpbit(), now=now, state_path=self.state_path)
+        result = scheduled_trader.run_tick(
+            FakeUpbit(), now=now, state_path=self.state_path, context_path=self.context_path
+        )
         state = scheduled_trader.load_state(self.state_path)
-        self.assertEqual(result["action"], "signal_cycle")
+        self.assertEqual(result["status"], "needs_decision")
+        self.assertTrue(result["decision_token"])
         self.assertEqual(state["session_date"], "2026-07-22")
         self.assertEqual(state["phase"], 1)
         self.assertEqual(state["phase_start_equity_krw"], 100_000)
@@ -63,8 +72,22 @@ class TestScheduledTrader(unittest.TestCase):
     def test_same_signal_slot_only_runs_heartbeat(self):
         first = datetime(2026, 7, 22, 2, 1, tzinfo=scheduled_trader.KST)
         second = datetime(2026, 7, 22, 2, 14, tzinfo=scheduled_trader.KST)
-        scheduled_trader.run_tick(FakeUpbit(), now=first, state_path=self.state_path)
-        result = scheduled_trader.run_tick(FakeUpbit(), now=second, state_path=self.state_path)
+        context = scheduled_trader.run_tick(
+            FakeUpbit(), now=first, state_path=self.state_path, context_path=self.context_path
+        )
+        with mock.patch.object(scheduled_trader.autotrade, "append_decision_history", return_value=False), mock.patch.object(
+            scheduled_trader.autotrade, "execute_rebalance_plan", return_value=False
+        ):
+            scheduled_trader.execute_llm_decision(
+                {"decision_token": context["decision_token"], "decisions": []},
+                upbit=FakeUpbit(),
+                now=first,
+                state_path=self.state_path,
+                context_path=self.context_path,
+            )
+        result = scheduled_trader.run_tick(
+            FakeUpbit(), now=second, state_path=self.state_path, context_path=self.context_path
+        )
         self.assertEqual(result["action"], "heartbeat_only")
 
     def test_profit_target_liquidates_and_completes_day(self):
@@ -81,7 +104,9 @@ class TestScheduledTrader(unittest.TestCase):
         with mock.patch.object(scheduled_trader, "liquidate_all", return_value=True) as liquidate, mock.patch.object(
             scheduled_trader.autotrade, "refresh_dashboard"
         ):
-            result = scheduled_trader.run_tick(FakeUpbit(), now=now, state_path=self.state_path)
+            result = scheduled_trader.run_tick(
+                FakeUpbit(), now=now, state_path=self.state_path, context_path=self.context_path
+            )
         self.assertEqual(result["status"], "completed_target")
         liquidate.assert_called_once()
 
@@ -99,13 +124,17 @@ class TestScheduledTrader(unittest.TestCase):
         with mock.patch.object(scheduled_trader, "liquidate_all", return_value=True), mock.patch.object(
             scheduled_trader.autotrade, "refresh_dashboard"
         ):
-            stopped = scheduled_trader.run_tick(FakeUpbit(), now=morning, state_path=self.state_path)
+            stopped = scheduled_trader.run_tick(
+                FakeUpbit(), now=morning, state_path=self.state_path, context_path=self.context_path
+            )
         self.assertEqual(stopped["status"], "waiting_noon")
 
         noon = datetime(2026, 7, 22, 12, 0, tzinfo=scheduled_trader.KST)
-        restarted = scheduled_trader.run_tick(FakeUpbit(), now=noon, state_path=self.state_path)
+        restarted = scheduled_trader.run_tick(
+            FakeUpbit(), now=noon, state_path=self.state_path, context_path=self.context_path
+        )
         state = scheduled_trader.load_state(self.state_path)
-        self.assertEqual(restarted["status"], "active")
+        self.assertEqual(restarted["status"], "needs_decision")
         self.assertEqual(state["phase"], 2)
         self.assertEqual(state["phase_start_equity_krw"], 100_000)
 
@@ -123,14 +152,18 @@ class TestScheduledTrader(unittest.TestCase):
         with mock.patch.object(scheduled_trader, "liquidate_all", return_value=True), mock.patch.object(
             scheduled_trader.autotrade, "refresh_dashboard"
         ):
-            result = scheduled_trader.run_tick(FakeUpbit(), now=now, state_path=self.state_path)
+            result = scheduled_trader.run_tick(
+                FakeUpbit(), now=now, state_path=self.state_path, context_path=self.context_path
+            )
         self.assertEqual(result["status"], "completed_stop")
         self.assertEqual(result["action"], "liquidated_until_next_session")
 
     def test_activation_time_prevents_early_api_access(self):
         now = datetime(2026, 7, 21, 23, 0, tzinfo=scheduled_trader.KST)
         with mock.patch.object(scheduled_trader, "ACTIVATE_AT", "2026-07-22T02:00:00+09:00"):
-            result = scheduled_trader.run_tick(upbit=None, now=now, state_path=self.state_path)
+            result = scheduled_trader.run_tick(
+                upbit=None, now=now, state_path=self.state_path, context_path=self.context_path
+            )
         self.assertEqual(result["status"], "waiting_activation")
 
     def test_failed_liquidation_is_retried_on_next_heartbeat(self):
@@ -148,9 +181,40 @@ class TestScheduledTrader(unittest.TestCase):
         with mock.patch.object(scheduled_trader, "liquidate_all", return_value=False), mock.patch.object(
             scheduled_trader.autotrade, "refresh_dashboard"
         ):
-            result = scheduled_trader.run_tick(upbit, now=now, state_path=self.state_path)
+            result = scheduled_trader.run_tick(
+                upbit, now=now, state_path=self.state_path, context_path=self.context_path
+            )
         self.assertEqual(result["status"], "liquidation_pending")
         self.assertEqual(result["remaining"], ["KRW-ETH"])
+
+    def test_llm_buy_is_limited_to_context_candidates(self):
+        snapshot = scheduled_trader.account_snapshot(FakeUpbit())
+        context = {
+            "decision_token": "token-123",
+            "candidates": [{"coin": "KRW-ETH"}],
+            "market_context": {"risk_mode": "normal"},
+        }
+        plan = scheduled_trader._validated_llm_plan(
+            {
+                "decision_token": "token-123",
+                "decisions": [{"ticker": "KRW-ETH", "decision": "BUY", "reason": "상승 추세"}],
+            },
+            context,
+            snapshot,
+        )
+        self.assertEqual(plan["cash_reserve_pct"], 0)
+        self.assertEqual(plan["decision_source"], "gpt-5.6-sol/high")
+        self.assertEqual(plan["decisions"][0]["decision"], "BUY")
+
+        with self.assertRaisesRegex(ValueError, "BUY is not allowed"):
+            scheduled_trader._validated_llm_plan(
+                {
+                    "decision_token": "token-123",
+                    "decisions": [{"ticker": "KRW-XRP", "decision": "BUY", "reason": "임의 종목"}],
+                },
+                context,
+                snapshot,
+            )
 
 
 if __name__ == "__main__":

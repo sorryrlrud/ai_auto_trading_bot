@@ -48,19 +48,25 @@ liquidation value. A phase closes all marketable holdings and stops at +1.0% or
 -0.75%. A stop before 12:00 KST waits until noon and starts phase 2 with a new
 baseline; a stop at or after noon ends the session until the next 02:00 rollover.
 Entry and rebalance signals are evaluated at most once per completed 15-minute
-slot, even when a heartbeat invokes the tick every minute.
+slot, even when the scheduled task invokes the tick every minute. The tick
+returns a bounded market/account context. A local Codex scheduled run using
+`gpt-5.6-sol` with `high` reasoning chooses BUY, SELL, or HOLD and submits a
+token-bound JSON decision through `execute_llm_trade_decision.sh`.
 
 Scheduled mode passes `cash_reserve_pct_override=0`, so it does not retain a
 strategy cash reserve. `SCHEDULED_ORDER_BUFFER=0.999` keeps only a 0.1% execution
 buffer for fees and rounding. Runtime state is stored in
 `scheduled_trading_state.json`; the signal slot is persisted before order
-execution to make retries at-most-once. Failed or partial liquidation remains in
-`liquidation_pending` and is retried by the next heartbeat.
+execution to make retries at-most-once. The pending model context is stored in
+`scheduled_llm_context.json` and expires after 10 minutes. The server rejects
+unknown buy candidates, sells of unowned assets, duplicate tickers, stale or
+reused decision tokens, and decisions above `MAX_POSITIONS`. Failed or partial
+liquidation remains in `liquidation_pending` and is retried by the next tick.
 
-Live scheduled orders require `SCHEDULED_TRADE_ENABLED=true`. Use
-`SCHEDULED_ACTIVATE_AT` for a first activation time such as
-`2026-07-22T02:00:00+09:00`. The local launcher uses the production bot UID/GID
-to avoid creating root-owned runtime files in the bind-mounted repository.
+Live scheduled orders require `SCHEDULED_TRADE_ENABLED=true`. An optional
+`SCHEDULED_ACTIVATE_AT` can delay first activation. The local launchers use the
+production bot UID/GID to avoid creating root-owned runtime files in the
+bind-mounted repository.
 
 ## Manual order API over SSH
 
