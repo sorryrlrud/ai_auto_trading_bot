@@ -86,10 +86,11 @@ configure_http_timeouts()
 
 
 @contextmanager
-def trade_execution_lock(path=TRADE_EXECUTION_LOCK_FILE):
+def trade_execution_lock(path=TRADE_EXECUTION_LOCK_FILE, blocking=True):
     """Serialize orders across the automatic bot and the manual API."""
     with open(path, "a+", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        operation = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+        fcntl.flock(lock_file.fileno(), operation)
         try:
             yield
         finally:

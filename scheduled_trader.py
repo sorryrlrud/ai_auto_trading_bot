@@ -399,7 +399,7 @@ def execute_llm_decision(decision, upbit=None, now=None, state_path=STATE_FILE, 
     if upbit is None:
         raise RuntimeError("Upbit credentials are not configured")
 
-    with autotrade.trade_execution_lock():
+    with autotrade.trade_execution_lock(blocking=False):
         state = load_state(state_path)
         context = load_llm_context(context_path)
         if not context:
@@ -454,7 +454,7 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
     if upbit is None:
         raise RuntimeError("Upbit credentials are not configured")
 
-    with autotrade.trade_execution_lock():
+    with autotrade.trade_execution_lock(blocking=False):
         snapshot = account_snapshot(upbit)
         state = load_state(state_path)
         session_date = trading_day(now)
@@ -597,6 +597,12 @@ def main():
             result = execute_llm_decision(json.loads(decoded))
         else:
             result = run_tick()
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+    except BlockingIOError:
+        result = {"status": "busy", "action": "skip_overlapping_tick"}
         if args.json:
             print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         else:

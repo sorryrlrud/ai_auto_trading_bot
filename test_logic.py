@@ -59,6 +59,14 @@ def sample_market_row(ticker="KRW-ETH", **overrides):
 
 
 class TestTradingLogic(unittest.TestCase):
+    def test_trade_execution_lock_can_fail_fast_for_overlapping_tick(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lock_path = f"{directory}/trade.lock"
+            with autotrade.trade_execution_lock(path=lock_path):
+                with self.assertRaises(BlockingIOError):
+                    with autotrade.trade_execution_lock(path=lock_path, blocking=False):
+                        self.fail("overlapping non-blocking lock unexpectedly succeeded")
+
     def test_dashboard_publisher_retries_pending_commit_before_new_commit(self):
         with mock.patch.object(publish_dashboard, "pending_commit_count", return_value=1), mock.patch.object(
             publish_dashboard, "has_dashboard_changes", return_value=True
