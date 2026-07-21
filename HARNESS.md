@@ -72,6 +72,9 @@ docker exec quant-ai-bot date
   15-minute signal slot needs judgment, the model reads the token-bound JSON
   context and pipes one constrained JSON decision to
   `execute_llm_trade_decision.sh`.
+- `quant-ai-manual-api` mounts the host SSH directory at `/host-ssh` and receives
+  the dashboard publishing settings because scheduled decisions now own
+  decision/trade dashboard updates after the legacy loop was removed.
 - `scheduled_trading_state.json` holds the 02:00 KST session baseline, current
   phase, last 15-minute signal slot, pause/completion state, and bounded event
   history. It is runtime data and must not be committed.
