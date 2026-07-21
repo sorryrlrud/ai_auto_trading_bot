@@ -72,6 +72,11 @@ docker exec quant-ai-bot date
   ten-minute signal slot needs judgment, the model reads the token-bound JSON
   context and pipes one constrained JSON decision to
   `execute_llm_trade_decision.sh`.
+- After a daily target or final stop completes, the trading automation pauses
+  itself so completed sessions do not keep consuming model tokens. A separate
+  no-trade control automation using `gpt-5.6-terra` with low reasoning
+  reactivates the trading automation every day at 02:00 KST. The first trading
+  tick then rolls the session state to the new trading day.
 - `quant-ai-manual-api` mounts the host SSH directory at `/host-ssh` and receives
   the dashboard publishing settings because scheduled decisions now own
   decision/trade dashboard updates after the legacy loop was removed.

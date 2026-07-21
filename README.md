@@ -74,6 +74,11 @@ Live scheduled orders require `SCHEDULED_TRADE_ENABLED=true`. An optional
 production bot UID/GID to avoid creating root-owned runtime files in the
 bind-mounted repository.
 
+The ten-minute Codex trading automation pauses itself after a completed daily
+target or final stop, preventing completed sessions from consuming more model
+tokens. A separate no-trade control automation reactivates it every day at
+02:00 KST; the next tick initializes the new daily session.
+
 An optional `SCHEDULED_DEACTIVATE_AT` ends a bounded trading window. At or after
 that KST timestamp, no new LLM decision can execute; the next scheduled tick
 liquidates marketable holdings and records `completed_test_window`.
