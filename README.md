@@ -34,6 +34,34 @@ Automatic publishing expects the host SSH configuration to be available at `${HO
 Upbit HTTP calls use `UPBIT_HTTP_TIMEOUT_SECONDS` (default `10`) so a stalled API response cannot block rebalance cycles and dashboard heartbeat publishing indefinitely.
 The entrypoint prepares SSH as root, creates a lightweight bot user for `BOT_UID:BOT_GID` (default `1001:1002` on the GCP VM), then drops privileges before starting Python so Git objects and runtime files created through the bind mount remain host-user writable.
 
+## Scheduled trading heartbeat
+
+The always-running `coin-bot` service is now a disabled legacy profile. Scheduled
+trading runs one deterministic tick at a time inside `quant-ai-manual-api`:
+
+```bash
+./run_scheduled_tick.sh
+```
+
+The session day rolls over at 02:00 KST. Every tick checks estimated account
+liquidation value. A phase closes all marketable holdings and stops at +1.0% or
+-0.75%. A stop before 12:00 KST waits until noon and starts phase 2 with a new
+baseline; a stop at or after noon ends the session until the next 02:00 rollover.
+Entry and rebalance signals are evaluated at most once per completed 15-minute
+slot, even when a heartbeat invokes the tick every minute.
+
+Scheduled mode passes `cash_reserve_pct_override=0`, so it does not retain a
+strategy cash reserve. `SCHEDULED_ORDER_BUFFER=0.999` keeps only a 0.1% execution
+buffer for fees and rounding. Runtime state is stored in
+`scheduled_trading_state.json`; the signal slot is persisted before order
+execution to make retries at-most-once. Failed or partial liquidation remains in
+`liquidation_pending` and is retried by the next heartbeat.
+
+Live scheduled orders require `SCHEDULED_TRADE_ENABLED=true`. Use
+`SCHEDULED_ACTIVATE_AT` for a first activation time such as
+`2026-07-22T02:00:00+09:00`. The local launcher uses the production bot UID/GID
+to avoid creating root-owned runtime files in the bind-mounted repository.
+
 ## Manual order API over SSH
 
 The manual market-order API is published only on the VM loopback interface. It is

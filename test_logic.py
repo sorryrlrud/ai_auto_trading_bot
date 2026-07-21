@@ -516,6 +516,18 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(plan["cash_reserve_pct"], 25)
         self.assertEqual(plan["buy_budget_krw"], 0)
 
+    def test_scheduled_plan_can_disable_cash_reserve(self):
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-STRONG")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+            cash_reserve_pct_override=0,
+        )
+        self.assertEqual(plan["cash_reserve_pct"], 0)
+        self.assertEqual(plan["buy_budget_krw"], 100000)
+
     def test_buy_cooldown_blocks_recently_traded_ticker(self):
         now_ts = 10_000
         state = {"trades": {"KRW-STRONG": {"last_sell_ts": now_ts - 60}}}

@@ -11,5 +11,6 @@ trade_history.json
 decision_history.json
 runtime_status.json
 manual_order_history.json
+scheduled_trading_state.json
 .trade_execution.lock
 .DS_Store

@@ -837,11 +837,24 @@ def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
     return False, "보유 추세 유지"
 
 
-def build_rebalance_plan(market_data, market_context, krw, current_holdings, recent_performance, state=None, now_ts=None):
+def build_rebalance_plan(
+    market_data,
+    market_context,
+    krw,
+    current_holdings,
+    recent_performance,
+    state=None,
+    now_ts=None,
+    cash_reserve_pct_override=None,
+):
     state = state or {"trades": {}}
     now_ts = now_ts or time.time()
     data_by_ticker = {row["coin"]: row for row in market_data}
-    reserve_pct = cash_reserve_pct(market_context, recent_performance)
+    reserve_pct = (
+        cash_reserve_pct(market_context, recent_performance)
+        if cash_reserve_pct_override is None
+        else max(min(float(cash_reserve_pct_override), 100.0), 0.0)
+    )
     threshold = buy_score_threshold(market_context, recent_performance)
     decisions = []
     entry_rejections = []
@@ -925,10 +938,25 @@ def seconds_until_next_cycle(now_ts=None, interval_seconds=LOOP_SLEEP_SECONDS, b
     return max(next_boundary - now_ts, 1)
 
 
-def execute_rebalance_plan(upbit, plan, state=None, acquire_lock=True):
+def execute_rebalance_plan(
+    upbit,
+    plan,
+    state=None,
+    acquire_lock=True,
+    order_buffer=ORDER_BUFFER,
+    trade_enabled=None,
+):
+    trade_enabled = TRADE_ENABLED if trade_enabled is None else bool(trade_enabled)
     if acquire_lock:
         with trade_execution_lock():
-            return execute_rebalance_plan(upbit, plan, state, acquire_lock=False)
+            return execute_rebalance_plan(
+                upbit,
+                plan,
+                state,
+                acquire_lock=False,
+                order_buffer=order_buffer,
+                trade_enabled=trade_enabled,
+            )
 
     state = state or {"trades": {}}
     state.setdefault("trades", {})
@@ -947,7 +975,7 @@ def execute_rebalance_plan(upbit, plan, state=None, acquire_lock=True):
         balance = upbit.get_balance(ticker.split("-")[1])
         current_price = pyupbit.get_current_price(ticker)
         if balance and current_price and balance * current_price >= MIN_ORDER_KRW:
-            if not TRADE_ENABLED:
+            if not trade_enabled:
                 logger.info(f"[DRY RUN SELL] {ticker} | {decision['reason']}")
                 continue
             logger.info(f"[SELL] {ticker} | {decision['reason']}")
@@ -978,12 +1006,12 @@ def execute_rebalance_plan(upbit, plan, state=None, acquire_lock=True):
     buy_targets = [d for d in decisions if d["decision"] == "BUY"]
 
     if buy_targets and investable_krw >= MIN_ORDER_KRW:
-        amount_per_coin = (investable_krw * ORDER_BUFFER) / len(buy_targets)
+        amount_per_coin = (investable_krw * order_buffer) / len(buy_targets)
         for decision in buy_targets:
             if amount_per_coin < MIN_ORDER_KRW:
                 logger.info(f"[BUY SKIP] {decision['ticker']} | order amount below minimum")
                 continue
-            if not TRADE_ENABLED:
+            if not trade_enabled:
                 logger.info(f"[DRY RUN BUY] {decision['ticker']} {int(amount_per_coin)} KRW | {decision['reason']}")
                 continue
             result = upbit.buy_market_order(decision["ticker"], amount_per_coin)
