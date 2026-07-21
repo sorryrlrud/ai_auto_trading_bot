@@ -24,9 +24,9 @@ ACTIVATE_AT = os.getenv("SCHEDULED_ACTIVATE_AT", "").strip()
 DEACTIVATE_AT = os.getenv("SCHEDULED_DEACTIVATE_AT", "").strip()
 START_HOUR = int(os.getenv("SCHEDULED_START_HOUR", "2"))
 RESTART_HOUR = int(os.getenv("SCHEDULED_RESTART_HOUR", "12"))
-TAKE_PROFIT_PCT = float(os.getenv("SCHEDULED_TAKE_PROFIT_PCT", "1.0"))
-MAX_LOSS_PCT = float(os.getenv("SCHEDULED_MAX_LOSS_PCT", "0.75"))
-SIGNAL_INTERVAL_MINUTES = int(os.getenv("SCHEDULED_SIGNAL_INTERVAL_MINUTES", "5"))
+TAKE_PROFIT_PCT = float(os.getenv("SCHEDULED_TAKE_PROFIT_PCT", "0.5"))
+MAX_LOSS_PCT = float(os.getenv("SCHEDULED_MAX_LOSS_PCT", "0.4"))
+SIGNAL_INTERVAL_MINUTES = int(os.getenv("SCHEDULED_SIGNAL_INTERVAL_MINUTES", "10"))
 ORDER_BUFFER = float(os.getenv("SCHEDULED_ORDER_BUFFER", "0.999"))
 ESTIMATED_SELL_FEE_RATE = float(os.getenv("SCHEDULED_ESTIMATED_SELL_FEE_RATE", "0.0005"))
 DECISION_SOURCE = "gpt-5.6-sol/medium"
@@ -153,6 +153,13 @@ def phase_return_pct(snapshot, state):
     return (snapshot["liquidation_equity_krw"] / baseline - 1) * 100
 
 
+def daily_return_pct(snapshot, state):
+    baseline = autotrade.safe_float(state.get("session_start_equity_krw"))
+    if baseline <= 0:
+        raise RuntimeError("Scheduled trading session baseline is missing or invalid")
+    return (snapshot["liquidation_equity_krw"] / baseline - 1) * 100
+
+
 def signal_slot(now):
     if SIGNAL_INTERVAL_MINUTES <= 0 or 60 % SIGNAL_INTERVAL_MINUTES:
         raise ValueError("SCHEDULED_SIGNAL_INTERVAL_MINUTES must be a positive divisor of 60")
@@ -161,13 +168,14 @@ def signal_slot(now):
 
 
 def _new_phase(state, snapshot, now, session_date, phase):
+    baseline = round(snapshot["liquidation_equity_krw"], 4)
     state.update(
         {
             "session_date": session_date.isoformat(),
             "status": "active",
             "phase": phase,
             "phase_started_at": _iso(now),
-            "phase_start_equity_krw": round(snapshot["liquidation_equity_krw"], 4),
+            "phase_start_equity_krw": baseline,
             "phase_return_pct": 0.0,
             "last_signal_slot": None,
             "paused_until": None,
@@ -175,6 +183,9 @@ def _new_phase(state, snapshot, now, session_date, phase):
             "completion_reason": None,
         }
     )
+    if phase == 1 or autotrade.safe_float(state.get("session_start_equity_krw")) <= 0:
+        state["session_start_equity_krw"] = baseline
+        state["daily_return_pct"] = 0.0
     state.setdefault("events", [])
 
 
@@ -214,7 +225,16 @@ def liquidate_all(upbit, snapshot, state, reason):
     )
 
 
-def complete_or_retry_liquidation(upbit, state, state_path, now, target_status, reason, return_pct):
+def complete_or_retry_liquidation(
+    upbit,
+    state,
+    state_path,
+    now,
+    target_status,
+    reason,
+    phase_return,
+    daily_return,
+):
     snapshot = account_snapshot(upbit)
     liquidate_all(upbit, snapshot, autotrade.load_bot_state(), reason)
     remaining = account_snapshot(upbit)["holdings"] if TRADE_ENABLED else snapshot["holdings"]
@@ -222,7 +242,8 @@ def complete_or_retry_liquidation(upbit, state, state_path, now, target_status, 
         state["status"] = "liquidation_pending"
         state["pending_target_status"] = target_status
         state["completion_reason"] = reason
-        state["phase_return_pct"] = round(return_pct, 4)
+        state["phase_return_pct"] = round(phase_return, 4)
+        state["daily_return_pct"] = round(daily_return, 4)
         state["last_tick_at"] = _iso(now)
         _record_event(
             state,
@@ -234,7 +255,9 @@ def complete_or_retry_liquidation(upbit, state, state_path, now, target_status, 
         save_state(state, state_path)
         return {
             "status": "liquidation_pending",
-            "return_pct": round(return_pct, 4),
+            "return_pct": round(daily_return, 4),
+            "phase_return_pct": round(phase_return, 4),
+            "daily_return_pct": round(daily_return, 4),
             "action": "retry_next_heartbeat",
             "remaining": [holding["ticker"] for holding in remaining],
         }
@@ -243,12 +266,15 @@ def complete_or_retry_liquidation(upbit, state, state_path, now, target_status, 
     state["pending_target_status"] = None
     state["completed_at"] = _iso(now) if target_status.startswith("completed_") else None
     state["completion_reason"] = reason
-    state["phase_return_pct"] = round(return_pct, 4)
+    state["phase_return_pct"] = round(phase_return, 4)
+    state["daily_return_pct"] = round(daily_return, 4)
     state["last_tick_at"] = _iso(now)
     save_state(state, state_path)
     return {
         "status": target_status,
-        "return_pct": round(return_pct, 4),
+        "return_pct": round(daily_return, 4),
+        "phase_return_pct": round(phase_return, 4),
+        "daily_return_pct": round(daily_return, 4),
         "action": "liquidated",
     }
 
@@ -262,6 +288,11 @@ def build_llm_context(
     state_path=STATE_FILE,
     context_path=LLM_CONTEXT_FILE,
 ):
+    deactivation = _parse_iso(DEACTIVATE_AT)
+    minutes_until_window_close = None
+    if deactivation:
+        minutes_until_window_close = max(int((deactivation - now).total_seconds() // 60), 0)
+
     market_context = autotrade.get_market_context()
     targets = autotrade.get_top_volume_targets(limit=25)
     holding_tickers = [holding["ticker"] for holding in snapshot["holdings"]]
@@ -295,6 +326,16 @@ def build_llm_context(
         "session_date": state["session_date"],
         "phase": state["phase"],
         "phase_return_pct": state["phase_return_pct"],
+        "daily_return_pct": state["daily_return_pct"],
+        "daily_target_pct": TAKE_PROFIT_PCT,
+        "phase_stop_loss_pct": -MAX_LOSS_PCT,
+        "remaining_to_daily_target_pct": round(
+            max(TAKE_PROFIT_PCT - autotrade.safe_float(state["daily_return_pct"]), 0.0),
+            4,
+        ),
+        "decision_interval_minutes": SIGNAL_INTERVAL_MINUTES,
+        "trading_window_deactivate_at": _iso(deactivation) if deactivation else None,
+        "minutes_until_trading_window_close": minutes_until_window_close,
         "market_context": market_context,
         "portfolio": {
             "krw": round(snapshot["krw"], 2),
@@ -308,6 +349,7 @@ def build_llm_context(
             "max_positions": autotrade.MAX_POSITIONS,
             "cash_reserve_pct": 0,
             "order_buffer": ORDER_BUFFER,
+            "legacy_scores_and_block_reasons_are_advisory": True,
             "buy_tickers_must_be_in_candidates": True,
             "sell_tickers_must_be_current_holdings": True,
             "one_decision_per_ticker": True,
@@ -417,8 +459,9 @@ def execute_llm_decision(decision, upbit=None, now=None, state_path=STATE_FILE, 
             raise RuntimeError("Pending LLM decision context is stale")
 
         snapshot = account_snapshot(upbit)
-        current_return = phase_return_pct(snapshot, state)
-        if current_return >= TAKE_PROFIT_PCT or current_return <= -MAX_LOSS_PCT:
+        current_phase_return = phase_return_pct(snapshot, state)
+        current_daily_return = daily_return_pct(snapshot, state)
+        if current_daily_return >= TAKE_PROFIT_PCT or current_phase_return <= -MAX_LOSS_PCT:
             raise RuntimeError("Account threshold changed; run prepare tick again before executing an LLM decision")
         plan = _validated_llm_plan(decision, context, snapshot)
 
@@ -477,11 +520,13 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
                     "action": "none",
                 }
 
-            baseline = autotrade.safe_float(state.get("phase_start_equity_krw"))
-            return_pct = phase_return_pct(snapshot, state) if baseline > 0 else 0.0
+            phase_baseline = autotrade.safe_float(state.get("phase_start_equity_krw"))
+            session_baseline = autotrade.safe_float(state.get("session_start_equity_krw"))
+            phase_return = phase_return_pct(snapshot, state) if phase_baseline > 0 else 0.0
+            daily_return = daily_return_pct(snapshot, state) if session_baseline > 0 else phase_return
             reason = f"예약매매 테스트 종료 시각 {_iso(deactivation)} 도달"
             if state.get("pending_target_status") != "completed_test_window":
-                _record_event(state, now, "test_window_ended", return_pct=round(return_pct, 4))
+                _record_event(state, now, "test_window_ended", daily_return_pct=round(daily_return, 4))
             result = complete_or_retry_liquidation(
                 upbit,
                 state,
@@ -489,7 +534,8 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
                 now,
                 "completed_test_window",
                 reason,
-                return_pct,
+                phase_return,
+                daily_return,
             )
             autotrade.refresh_dashboard()
             if result["status"] == "completed_test_window":
@@ -501,7 +547,8 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
             pending_session = state.get("session_date")
             reason = state.get("completion_reason") or "예약매매 청산 재시도"
             target_status = state.get("pending_target_status") or "completed_stop"
-            return_pct = autotrade.safe_float(state.get("phase_return_pct"))
+            phase_return = autotrade.safe_float(state.get("phase_return_pct"))
+            daily_return = autotrade.safe_float(state.get("daily_return_pct"))
             result = complete_or_retry_liquidation(
                 upbit,
                 state,
@@ -509,7 +556,8 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
                 now,
                 target_status,
                 reason,
-                return_pct,
+                phase_return,
+                daily_return,
             )
             if result["status"] == "liquidation_pending" or pending_session == session_date.isoformat():
                 return result
@@ -519,8 +567,18 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
         if state.get("session_date") != session_date.isoformat():
             _new_phase(state, snapshot, now, session_date, phase=1)
             _record_event(state, now, "session_started", equity_krw=round(snapshot["liquidation_equity_krw"], 2))
+        elif autotrade.safe_float(state.get("session_start_equity_krw")) <= 0:
+            state["session_start_equity_krw"] = autotrade.safe_float(state.get("phase_start_equity_krw"))
+            state["daily_return_pct"] = round(daily_return_pct(snapshot, state), 4)
+            _record_event(
+                state,
+                now,
+                "session_baseline_migrated",
+                equity_krw=round(state["session_start_equity_krw"], 2),
+            )
 
         if state.get("status") in {"completed_target", "completed_stop", "completed_test_window"}:
+            state["daily_return_pct"] = round(daily_return_pct(snapshot, state), 4)
             state["last_tick_at"] = _iso(now)
             state["last_equity_krw"] = round(snapshot["liquidation_equity_krw"], 4)
             save_state(state, state_path)
@@ -528,13 +586,16 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
                 "status": state["status"],
                 "session_date": state["session_date"],
                 "phase": state["phase"],
-                "return_pct": state.get("phase_return_pct"),
+                "return_pct": state.get("daily_return_pct"),
+                "phase_return_pct": state.get("phase_return_pct"),
+                "daily_return_pct": state.get("daily_return_pct"),
                 "action": "none_until_next_session",
             }
 
         if state.get("status") == "waiting_noon":
             resume_at = _parse_iso(state.get("paused_until")) or restart_at(session_date)
             if now < resume_at:
+                state["daily_return_pct"] = round(daily_return_pct(snapshot, state), 4)
                 state["last_tick_at"] = _iso(now)
                 save_state(state, state_path)
                 return {
@@ -546,14 +607,16 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
             _new_phase(state, snapshot, now, session_date, phase=2)
             _record_event(state, now, "noon_restart", equity_krw=round(snapshot["liquidation_equity_krw"], 2))
 
-        return_pct = phase_return_pct(snapshot, state)
-        state["phase_return_pct"] = round(return_pct, 4)
+        phase_return = phase_return_pct(snapshot, state)
+        day_return = daily_return_pct(snapshot, state)
+        state["phase_return_pct"] = round(phase_return, 4)
+        state["daily_return_pct"] = round(day_return, 4)
         state["last_equity_krw"] = round(snapshot["liquidation_equity_krw"], 4)
         state["last_tick_at"] = _iso(now)
 
-        if return_pct >= TAKE_PROFIT_PCT:
-            reason = f"예약매매 단계 수익률 {return_pct:.4f}%가 목표 {TAKE_PROFIT_PCT}% 도달"
-            _record_event(state, now, "target_reached", return_pct=round(return_pct, 4))
+        if day_return >= TAKE_PROFIT_PCT:
+            reason = f"예약매매 하루 누적 수익률 {day_return:.4f}%가 목표 {TAKE_PROFIT_PCT}% 도달"
+            _record_event(state, now, "target_reached", daily_return_pct=round(day_return, 4))
             result = complete_or_retry_liquidation(
                 upbit,
                 state,
@@ -561,19 +624,27 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
                 now,
                 "completed_target",
                 reason,
-                return_pct,
+                phase_return,
+                day_return,
             )
             autotrade.refresh_dashboard()
             return result
 
-        if return_pct <= -MAX_LOSS_PCT:
-            reason = f"예약매매 단계 수익률 {return_pct:.4f}%가 손절 -{MAX_LOSS_PCT}% 도달"
+        if phase_return <= -MAX_LOSS_PCT:
+            reason = f"예약매매 단계 수익률 {phase_return:.4f}%가 손절 -{MAX_LOSS_PCT}% 도달"
             if now < restart_at(session_date):
                 target_status = "waiting_noon"
                 state["paused_until"] = _iso(restart_at(session_date))
             else:
                 target_status = "completed_stop"
-            _record_event(state, now, "stop_loss", return_pct=round(return_pct, 4), next_status=target_status)
+            _record_event(
+                state,
+                now,
+                "stop_loss",
+                phase_return_pct=round(phase_return, 4),
+                daily_return_pct=round(day_return, 4),
+                next_status=target_status,
+            )
             result = complete_or_retry_liquidation(
                 upbit,
                 state,
@@ -581,7 +652,8 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
                 now,
                 target_status,
                 reason,
-                return_pct,
+                phase_return,
+                day_return,
             )
             autotrade.refresh_dashboard()
             if result["status"] == "waiting_noon":
@@ -597,7 +669,9 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
                 "status": "active",
                 "session_date": state["session_date"],
                 "phase": state["phase"],
-                "return_pct": round(return_pct, 4),
+                "return_pct": round(day_return, 4),
+                "phase_return_pct": round(phase_return, 4),
+                "daily_return_pct": round(day_return, 4),
                 "action": "heartbeat_only",
             }
 
@@ -606,7 +680,9 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
                 "status": "active_dry_run",
                 "session_date": state["session_date"],
                 "phase": state["phase"],
-                "return_pct": round(return_pct, 4),
+                "return_pct": round(day_return, 4),
+                "phase_return_pct": round(phase_return, 4),
+                "daily_return_pct": round(day_return, 4),
                 "action": "signal_skipped",
             }
 

@@ -38,6 +38,9 @@ class TestScheduledTrader(unittest.TestCase):
             mock.patch.object(scheduled_trader, "ACTIVATE_AT", ""),
             mock.patch.object(scheduled_trader, "DEACTIVATE_AT", ""),
             mock.patch.object(scheduled_trader, "TRADE_ENABLED", True),
+            mock.patch.object(scheduled_trader, "TAKE_PROFIT_PCT", 0.5),
+            mock.patch.object(scheduled_trader, "MAX_LOSS_PCT", 0.4),
+            mock.patch.object(scheduled_trader, "SIGNAL_INTERVAL_MINUTES", 10),
             mock.patch.object(scheduled_trader.pyupbit, "get_current_price", return_value=10_000),
             mock.patch.object(scheduled_trader.autotrade, "_sleep_api"),
             mock.patch.object(scheduled_trader.autotrade, "trade_execution_lock", mock.MagicMock()),
@@ -69,10 +72,13 @@ class TestScheduledTrader(unittest.TestCase):
         self.assertEqual(state["session_date"], "2026-07-22")
         self.assertEqual(state["phase"], 1)
         self.assertEqual(state["phase_start_equity_krw"], 100_000)
+        self.assertEqual(state["session_start_equity_krw"], 100_000)
+        self.assertEqual(result["decision_interval_minutes"], 10)
+        self.assertEqual(result["daily_target_pct"], 0.5)
 
     def test_same_signal_slot_only_runs_heartbeat(self):
         first = datetime(2026, 7, 22, 2, 1, tzinfo=scheduled_trader.KST)
-        second = datetime(2026, 7, 22, 2, 4, tzinfo=scheduled_trader.KST)
+        second = datetime(2026, 7, 22, 2, 9, tzinfo=scheduled_trader.KST)
         context = scheduled_trader.run_tick(
             FakeUpbit(), now=first, state_path=self.state_path, context_path=self.context_path
         )
@@ -91,6 +97,26 @@ class TestScheduledTrader(unittest.TestCase):
         )
         self.assertEqual(result["action"], "heartbeat_only")
 
+    def test_existing_state_migrates_original_daily_baseline(self):
+        now = datetime(2026, 7, 21, 20, 5, tzinfo=scheduled_trader.KST)
+        scheduled_trader.save_state(
+            {
+                "session_date": "2026-07-21",
+                "status": "active",
+                "phase": 1,
+                "phase_start_equity_krw": 100_000,
+                "last_signal_slot": scheduled_trader.signal_slot(now),
+            },
+            self.state_path,
+        )
+        result = scheduled_trader.run_tick(
+            FakeUpbit(), now=now, state_path=self.state_path, context_path=self.context_path
+        )
+        state = scheduled_trader.load_state(self.state_path)
+        self.assertEqual(result["action"], "heartbeat_only")
+        self.assertEqual(state["session_start_equity_krw"], 100_000)
+        self.assertEqual(state["daily_return_pct"], 0.0)
+
     def test_profit_target_liquidates_and_completes_day(self):
         now = datetime(2026, 7, 22, 9, 0, tzinfo=scheduled_trader.KST)
         scheduled_trader.save_state(
@@ -98,7 +124,8 @@ class TestScheduledTrader(unittest.TestCase):
                 "session_date": "2026-07-22",
                 "status": "active",
                 "phase": 1,
-                "phase_start_equity_krw": 99_000,
+                "phase_start_equity_krw": 100_000,
+                "session_start_equity_krw": 99_500,
             },
             self.state_path,
         )
@@ -118,7 +145,8 @@ class TestScheduledTrader(unittest.TestCase):
                 "session_date": "2026-07-22",
                 "status": "active",
                 "phase": 1,
-                "phase_start_equity_krw": 101_000,
+                "phase_start_equity_krw": 100_500,
+                "session_start_equity_krw": 100_500,
             },
             self.state_path,
         )
@@ -138,6 +166,49 @@ class TestScheduledTrader(unittest.TestCase):
         self.assertEqual(restarted["status"], "needs_decision")
         self.assertEqual(state["phase"], 2)
         self.assertEqual(state["phase_start_equity_krw"], 100_000)
+        self.assertEqual(state["session_start_equity_krw"], 100_500)
+        self.assertLess(restarted["daily_return_pct"], -0.4)
+
+    def test_phase_two_gain_does_not_complete_before_daily_target(self):
+        now = datetime(2026, 7, 22, 12, 10, tzinfo=scheduled_trader.KST)
+        scheduled_trader.save_state(
+            {
+                "session_date": "2026-07-22",
+                "status": "active",
+                "phase": 2,
+                "phase_start_equity_krw": 99_600,
+                "session_start_equity_krw": 100_000,
+            },
+            self.state_path,
+        )
+        result = scheduled_trader.run_tick(
+            FakeUpbit(), now=now, state_path=self.state_path, context_path=self.context_path
+        )
+        self.assertEqual(result["status"], "needs_decision")
+        self.assertGreater(result["phase_return_pct"], 0.4)
+        self.assertEqual(result["daily_return_pct"], 0.0)
+
+    def test_phase_two_closes_after_reaching_daily_target(self):
+        now = datetime(2026, 7, 22, 12, 20, tzinfo=scheduled_trader.KST)
+        scheduled_trader.save_state(
+            {
+                "session_date": "2026-07-22",
+                "status": "active",
+                "phase": 2,
+                "phase_start_equity_krw": 99_600,
+                "session_start_equity_krw": 100_000,
+            },
+            self.state_path,
+        )
+        with mock.patch.object(scheduled_trader.autotrade, "refresh_dashboard"):
+            result = scheduled_trader.run_tick(
+                FakeUpbit(krw=100_501),
+                now=now,
+                state_path=self.state_path,
+                context_path=self.context_path,
+            )
+        self.assertEqual(result["status"], "completed_target")
+        self.assertGreaterEqual(result["daily_return_pct"], 0.5)
 
     def test_afternoon_stop_completes_day(self):
         now = datetime(2026, 7, 22, 12, 1, tzinfo=scheduled_trader.KST)
@@ -146,7 +217,8 @@ class TestScheduledTrader(unittest.TestCase):
                 "session_date": "2026-07-22",
                 "status": "active",
                 "phase": 2,
-                "phase_start_equity_krw": 101_000,
+                "phase_start_equity_krw": 100_500,
+                "session_start_equity_krw": 100_000,
             },
             self.state_path,
         )
@@ -175,6 +247,7 @@ class TestScheduledTrader(unittest.TestCase):
                 "status": "active",
                 "phase": 1,
                 "phase_start_equity_krw": 100_000,
+                "session_start_equity_krw": 100_000,
             },
             self.state_path,
         )
@@ -205,7 +278,8 @@ class TestScheduledTrader(unittest.TestCase):
                 "session_date": "2026-07-22",
                 "status": "active",
                 "phase": 2,
-                "phase_start_equity_krw": 101_000,
+                "phase_start_equity_krw": 100_500,
+                "session_start_equity_krw": 100_000,
             },
             self.state_path,
         )

@@ -44,14 +44,20 @@ trading runs one deterministic tick at a time inside `quant-ai-manual-api`:
 ```
 
 The session day rolls over at 02:00 KST. Every tick checks estimated account
-liquidation value. A phase closes all marketable holdings and stops at +1.0% or
--0.75%. A stop before 12:00 KST waits until noon and starts phase 2 with a new
-baseline; a stop at or after noon ends the session until the next 02:00 rollover.
-Entry and rebalance signals are evaluated at most once per completed 5-minute
-slot, matching the five-minute scheduled task cadence. The tick
+liquidation value. The daily target closes all marketable holdings when return
+from the 02:00 session baseline reaches +0.5%. A phase-level -0.4% stop before
+12:00 KST waits until noon and starts phase 2 with a new stop-loss baseline while
+preserving the original daily baseline; a stop at or after noon ends the session.
+Entry and rebalance signals are evaluated at most once per completed 10-minute
+slot, matching the ten-minute scheduled task cadence. The tick
 returns a bounded market/account context. A local Codex scheduled run using
 `gpt-5.6-sol` with `medium` reasoning chooses BUY, SELL, or HOLD and submits a
 token-bound JSON decision through `execute_llm_trade_decision.sh`.
+
+The LLM context identifies the 10-minute decision cadence and includes current
+daily return, remaining return to the +0.5% target, and completed daily, 1-hour,
+and 10-minute indicators. Legacy scores and block reasons are advisory; the LLM
+makes the final signal decision within the hard execution and risk constraints.
 
 Scheduled mode passes `cash_reserve_pct_override=0`, so it does not retain a
 strategy cash reserve. `SCHEDULED_ORDER_BUFFER=0.999` keeps only a 0.1% execution

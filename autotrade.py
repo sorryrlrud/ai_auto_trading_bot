@@ -30,7 +30,7 @@ load_dotenv()
 
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
-LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
+LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "600"))
 API_CALL_SLEEP_SECONDS = float(os.getenv("API_CALL_SLEEP_SECONDS", "0.12"))
 UPBIT_HTTP_TIMEOUT_SECONDS = float(os.getenv("UPBIT_HTTP_TIMEOUT_SECONDS", "10"))
 MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "3"))
@@ -503,15 +503,15 @@ def get_market_data(ticker):
 
         df_1h = pyupbit.get_ohlcv(ticker, interval="minute60", count=80)
         _sleep_api()
-        df_15m = pyupbit.get_ohlcv(ticker, interval="minute15", count=80)
+        df_10m = pyupbit.get_ohlcv(ticker, interval="minute10", count=80)
         _sleep_api()
-        if df_1h is None or len(df_1h) < 30 or df_15m is None or len(df_15m) < 30:
+        if df_1h is None or len(df_1h) < 30 or df_10m is None or len(df_10m) < 30:
             return None
 
         df = _completed_candles(df, min_rows=60)
         df_1h = _completed_candles(df_1h, min_rows=30)
-        df_15m = _completed_candles(df_15m, min_rows=30)
-        if df is None or df_1h is None or df_15m is None:
+        df_10m = _completed_candles(df_10m, min_rows=30)
+        if df is None or df_1h is None or df_10m is None:
             return None
 
         df = _add_basic_indicators(df)
@@ -519,7 +519,7 @@ def get_market_data(ticker):
         df["MA_20"] = df["close"].rolling(20).mean()
         df["MA_60"] = df["close"].rolling(60).mean()
         df_1h = _add_basic_indicators(df_1h)
-        df_15m = _add_basic_indicators(df_15m)
+        df_10m = _add_basic_indicators(df_10m)
 
         current_price = pyupbit.get_current_price(ticker)
         _sleep_api()
@@ -529,7 +529,7 @@ def get_market_data(ticker):
         volume_ratio = finite_float(df["volume"].iloc[-1] / df["volume"].rolling(20).mean().iloc[-1], 1.0)
         price_change_1d = finite_float(df["close"].pct_change().iloc[-1] * 100)
         price_change_3d = finite_float((df["close"].iloc[-1] / df["close"].iloc[-4] - 1) * 100)
-        price_change_1h = finite_float((df_15m["close"].iloc[-1] / df_15m["close"].iloc[-5] - 1) * 100)
+        price_change_1h = finite_float((df_10m["close"].iloc[-1] / df_10m["close"].iloc[-7] - 1) * 100)
         price_change_6h = finite_float((df_1h["close"].iloc[-1] / df_1h["close"].iloc[-7] - 1) * 100)
         ma20 = finite_float(df["MA_20"].iloc[-1])
         ma60 = finite_float(df["MA_60"].iloc[-1])
@@ -559,7 +559,7 @@ def get_market_data(ticker):
                     "bb_position": round(finite_float(bb_position, 0.5), 2),
                 },
                 "1h": _trend_snapshot(df_1h),
-                "15m": _trend_snapshot(df_15m),
+                "10m": _trend_snapshot(df_10m),
             },
         }
     except Exception as e:
@@ -657,7 +657,7 @@ def buy_score_threshold(market_context, recent_performance):
 def entry_block_reason(data, market_context):
     daily = data["indicators"]["daily"]
     hour = data["indicators"]["1h"]
-    minute = data["indicators"]["15m"]
+    minute = data["indicators"]["10m"]
 
     if data["coin"] in EXCLUDED_ENTRY_TICKERS:
         return "전략 제외 종목"
@@ -672,7 +672,7 @@ def entry_block_reason(data, market_context):
     if not (hour["ma5_over_long"] and hour["price_over_long"] and hour["macd_hist"] > 0):
         return "1시간 추세 미정렬"
     if not (minute["ma5_over_long"] and minute["price_over_long"] and minute["macd_hist"] > 0):
-        return "15분 추세 미정렬"
+        return "10분 추세 미정렬"
     if daily["rsi"] > 72 or hour["rsi"] > 75 or minute["rsi"] > 78:
         return "과열 구간"
     if data["volume_ratio"] > 5 or data["price_change_1d"] > 12 or data["price_change_1h"] > 7:
@@ -683,7 +683,7 @@ def entry_block_reason(data, market_context):
 def score_coin(data, market_context):
     daily = data["indicators"]["daily"]
     hour = data["indicators"]["1h"]
-    minute = data["indicators"]["15m"]
+    minute = data["indicators"]["10m"]
     rsi = daily["rsi"]
     score = 0.0
     reasons = []
@@ -731,19 +731,19 @@ def score_coin(data, market_context):
 
     if minute["ma5_over_long"]:
         score += 1.0
-        reasons.append("15m MA5>MA20")
+        reasons.append("10m MA5>MA20")
     if minute["price_over_long"]:
         score += 1.0
-        reasons.append("15m price>MA20")
+        reasons.append("10m price>MA20")
     if minute["macd_hist"] > 0:
         score += 1.0
-        reasons.append("15m MACD+")
+        reasons.append("10m MACD+")
     if 45 <= minute["rsi"] <= 70:
         score += 0.75
-        reasons.append("15m RSI ok")
+        reasons.append("10m RSI ok")
     elif minute["rsi"] > 78:
         score -= 1.5
-        reasons.append("15m overheated")
+        reasons.append("10m overheated")
 
     volume_ratio = data["volume_ratio"]
     if 1.2 <= volume_ratio <= 3.5:
@@ -815,7 +815,7 @@ def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
 
     daily = data["indicators"]["daily"]
     hour = data["indicators"]["1h"]
-    minute = data["indicators"]["15m"]
+    minute = data["indicators"]["10m"]
     trend_broken = not daily["price_over_ma20"] and not daily["ma5_over_20"] and daily["macd_hist"] < 0
     hour_broken = not hour["price_over_long"] and not hour["ma5_over_long"] and hour["macd_hist"] < 0
     short_broken = not minute["price_over_long"] and not minute["ma5_over_long"] and minute["macd_hist"] < 0
@@ -825,11 +825,11 @@ def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
     if profit_pct >= TAKE_PROFIT_PCT and (overheated or intraday_overheated or short_broken):
         return True, f"수익 {profit_pct}% 및 과열 신호로 익절"
     if profit_pct >= PROFIT_PROTECT_PCT and short_broken:
-        return True, f"수익 {profit_pct}% 보호: 15분 추세 훼손"
+        return True, f"수익 {profit_pct}% 보호: 10분 추세 훼손"
     if age is not None and age < MIN_HOLD_SECONDS and profit_pct > STOP_LOSS_PCT:
         return False, f"최소 보유시간 유지({int(age)}초/{MIN_HOLD_SECONDS}초)"
     if profit_pct < -0.7 and short_broken and hour_broken:
-        return True, f"손실 {profit_pct}% 및 15분/1시간 추세 동반 훼손"
+        return True, f"손실 {profit_pct}% 및 10분/1시간 추세 동반 훼손"
     if profit_pct < 0 and trend_broken:
         return True, f"손실 {profit_pct}% 상태에서 추세 훼손"
     if market_context.get("risk_mode") == "defensive" and (trend_broken or hour_broken):

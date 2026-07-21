@@ -65,24 +65,26 @@ docker exec quant-ai-bot date
 
 - The former always-running `coin-bot` service is behind the Compose
   `legacy-loop` profile and must remain stopped during scheduled operation.
-- A five-minute local Codex scheduled task calls `run_scheduled_tick.sh`, which connects
+- A ten-minute local Codex scheduled task calls `run_scheduled_tick.sh`, which connects
   to the VM and runs one `scheduled_trader.py` tick inside
   `quant-ai-manual-api` as UID/GID `1001:1002`.
 - The scheduled task is pinned to `gpt-5.6-sol` with `medium` reasoning. When a
-  five-minute signal slot needs judgment, the model reads the token-bound JSON
+  ten-minute signal slot needs judgment, the model reads the token-bound JSON
   context and pipes one constrained JSON decision to
   `execute_llm_trade_decision.sh`.
 - `quant-ai-manual-api` mounts the host SSH directory at `/host-ssh` and receives
   the dashboard publishing settings because scheduled decisions now own
   decision/trade dashboard updates after the legacy loop was removed.
 - `scheduled_trading_state.json` holds the 02:00 KST session baseline, current
-  phase, last five-minute signal slot, pause/completion state, and bounded event
+  phase, original daily baseline, last ten-minute signal slot, pause/completion
+  state, and bounded event
   history. It is runtime data and must not be committed.
-- Every five minutes checks account-level estimated liquidation return. Market
-  scanning and LLM judgment occur only once per five-minute slot.
-- Phase thresholds are +1.0% and -0.75%. A pre-noon stop liquidates and waits
-  for a phase-2 restart at 12:00; a stop at/after noon or a profit target ends
-  trading until the next 02:00 session.
+- Every ten minutes checks account-level estimated liquidation return. Market
+  scanning and LLM judgment occur only once per ten-minute slot.
+- The profit target is +0.5% from the original 02:00 daily baseline. The -0.4%
+  stop is measured from the current phase baseline. A pre-noon stop liquidates
+  and waits for a phase-2 restart at 12:00 while preserving the daily baseline;
+  a stop at/after noon or the daily profit target ends the session.
 - Scheduled entry planning uses a 0% cash reserve plus a 0.1% fee/rounding order
   buffer.
 - A bounded test can set `SCHEDULED_DEACTIVATE_AT`; the first tick at or after
@@ -249,13 +251,15 @@ Do not force-push over dashboard commits unless there is a deliberate reason.
 
 ## Current strategy guardrails
 
-- Entry indicators are calculated from completed candles only; the latest in-progress daily, 1-hour, and 15-minute candles are excluded before RSI/MACD/MA calculations.
-- With the current default `ALLOW_DEFENSIVE_BUYS=false`, `risk_mode=defensive` blocks all new entries while still managing existing holdings.
-- Candidate entries are hard-blocked when the long-term trend is not aligned, the 1-hour or 15-minute trend is not aligned, the market is overheated, the move is too extended, or `atr_pct` exceeds `MAX_ENTRY_ATR_PCT` (default `12.0`).
+- Entry indicators are calculated from completed candles only; the latest in-progress daily, 1-hour, and 10-minute candles are excluded before RSI/MACD/MA calculations.
+- In the disabled legacy rule planner, `ALLOW_DEFENSIVE_BUYS=false` blocks new
+  entries during `risk_mode=defensive`. Scheduled LLM mode receives that result
+  as advisory context and makes the final signal decision from the raw indicators.
+- Candidate entries are flagged when the long-term trend is not aligned, the 1-hour or 10-minute trend is not aligned, the market is overheated, the move is too extended, or `atr_pct` exceeds `MAX_ENTRY_ATR_PCT` (default `12.0`). In scheduled LLM mode these legacy flags are advisory rather than an automatic veto.
 - Stablecoin-like entry candidates are excluded by default through `EXCLUDED_ENTRY_TICKERS=KRW-USDT,KRW-USDC,KRW-USD1`.
 - The top-volume target scan batches the full KRW market list instead of checking only an initial slice of tickers.
-- Small losing positions are no longer sold on a 15-minute break alone; early loss exits require both 15-minute and 1-hour trend damage unless a harder stop-loss or other broader exit rule is hit.
-- The rebalance loop now aligns to `LOOP_SLEEP_SECONDS` boundaries with a `CANDLE_CLOSE_BUFFER_SECONDS` delay (default `20`) instead of sleeping a flat interval after each cycle. With the default 900-second loop this targets the first moments after each 15-minute candle close.
+- Small losing positions are no longer sold on a 10-minute break alone; early loss exits require both 10-minute and 1-hour trend damage unless a harder stop-loss or other broader exit rule is hit.
+- The rebalance loop now aligns to `LOOP_SLEEP_SECONDS` boundaries with a `CANDLE_CLOSE_BUFFER_SECONDS` delay (default `20`) instead of sleeping a flat interval after each cycle. With the default 600-second loop this targets the first moments after each 10-minute candle close.
 - Consecutive identical decision snapshots are deduplicated, so repeated no-op defensive cycles do not keep creating dashboard commits.
 - Dashboard refresh subprocess failures now log command, return code, stdout, and stderr so future publish regressions are diagnosable from `trading.log`.
 

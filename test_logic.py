@@ -37,7 +37,7 @@ def sample_market_row(ticker="KRW-ETH", **overrides):
                 "price_over_long": True,
                 "volume_ratio": 1.4,
             },
-            "15m": {
+            "10m": {
                 "rsi": 58,
                 "macd_hist": 2,
                 "ma5_over_long": True,
@@ -54,7 +54,7 @@ def sample_market_row(ticker="KRW-ETH", **overrides):
         elif key.startswith("hour_"):
             row["indicators"]["1h"][key.replace("hour_", "")] = value
         elif key.startswith("minute_"):
-            row["indicators"]["15m"][key.replace("minute_", "")] = value
+            row["indicators"]["10m"][key.replace("minute_", "")] = value
     return row
 
 
