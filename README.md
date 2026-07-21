@@ -34,6 +34,57 @@ Automatic publishing expects the host SSH configuration to be available at `${HO
 Upbit HTTP calls use `UPBIT_HTTP_TIMEOUT_SECONDS` (default `10`) so a stalled API response cannot block rebalance cycles and dashboard heartbeat publishing indefinitely.
 The entrypoint prepares SSH as root, creates a lightweight bot user for `BOT_UID:BOT_GID` (default `1001:1002` on the GCP VM), then drops privileges before starting Python so Git objects and runtime files created through the bind mount remain host-user writable.
 
+## Manual order API over SSH
+
+The manual market-order API is published only on the VM loopback interface. It is
+not reachable from the public network. Start an SSH tunnel from the authorized Mac:
+
+```bash
+ssh -N \
+  -o ExitOnForwardFailure=yes \
+  -L 8765:127.0.0.1:8765 \
+  sorryrlrud@136.119.201.220
+```
+
+While the tunnel is open, check the API from another local terminal:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+Submit a market buy by KRW amount:
+
+```bash
+curl -X POST http://127.0.0.1:8765/v1/orders/buy \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "market": "KRW-BTC",
+    "amount_krw": 10000,
+    "idempotency_key": "replace-with-a-new-unique-value",
+    "confirm": "CONFIRM"
+  }'
+```
+
+Submit a market sell by percentage of the available asset balance:
+
+```bash
+curl -X POST http://127.0.0.1:8765/v1/orders/sell \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "market": "KRW-BTC",
+    "percentage": 100,
+    "idempotency_key": "replace-with-another-new-unique-value",
+    "confirm": "CONFIRM"
+  }'
+```
+
+`idempotency_key` prevents a retried request from placing the same order twice.
+Reusing it with different order parameters is rejected. Each request also requires
+the literal `"confirm": "CONFIRM"`. Manual ordering is disabled unless
+`MANUAL_TRADE_ENABLED=true`; market buys are capped by `MANUAL_MAX_BUY_KRW`
+(default `100000`). The automatic bot and manual API share a process-level file
+lock so they cannot submit orders at the same time.
+
 ## Local test
 
 ```bash

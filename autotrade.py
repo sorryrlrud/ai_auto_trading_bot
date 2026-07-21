@@ -3,8 +3,11 @@ import logging
 import os
 import subprocess
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import wraps
+
+import fcntl
 
 import pandas as pd
 import pandas_ta as ta  # registers the df.ta accessor
@@ -54,6 +57,7 @@ TRADE_HISTORY_FILE = "trade_history.json"
 DECISION_HISTORY_FILE = "decision_history.json"
 BOT_STATE_FILE = "bot_state.json"
 RUNTIME_STATUS_FILE = "runtime_status.json"
+TRADE_EXECUTION_LOCK_FILE = os.getenv("TRADE_EXECUTION_LOCK_FILE", ".trade_execution.lock")
 ENTRY_STATE_FIELDS = ("entry_volume", "entry_funds_krw", "entry_fee_krw")
 
 _ORIGINAL_REQUESTS_METHODS = {name: getattr(requests, name) for name in ("get", "post", "delete")}
@@ -79,6 +83,17 @@ def configure_http_timeouts(timeout_seconds=UPBIT_HTTP_TIMEOUT_SECONDS):
 
 
 configure_http_timeouts()
+
+
+@contextmanager
+def trade_execution_lock(path=TRADE_EXECUTION_LOCK_FILE):
+    """Serialize orders across the automatic bot and the manual API."""
+    with open(path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def safe_float(value, default=0.0):
@@ -910,7 +925,11 @@ def seconds_until_next_cycle(now_ts=None, interval_seconds=LOOP_SLEEP_SECONDS, b
     return max(next_boundary - now_ts, 1)
 
 
-def execute_rebalance_plan(upbit, plan, state=None):
+def execute_rebalance_plan(upbit, plan, state=None, acquire_lock=True):
+    if acquire_lock:
+        with trade_execution_lock():
+            return execute_rebalance_plan(upbit, plan, state, acquire_lock=False)
+
     state = state or {"trades": {}}
     state.setdefault("trades", {})
     decisions = plan.get("decisions", [])
@@ -1004,44 +1023,45 @@ def main():
             logger.info("\n--- 리밸런싱 사이클 시작 ---")
             mark_cycle_started()
 
-            recent_performance = load_recent_performance()
-            state = load_bot_state()
-            current_holdings = get_current_holdings(upbit)
-            market_context = get_market_context()
-            targets = get_top_volume_targets(limit=25)
-            holding_tickers = [holding["ticker"] for holding in current_holdings]
-            targets = list(dict.fromkeys(targets + holding_tickers))
+            with trade_execution_lock():
+                recent_performance = load_recent_performance()
+                state = load_bot_state()
+                current_holdings = get_current_holdings(upbit)
+                market_context = get_market_context()
+                targets = get_top_volume_targets(limit=25)
+                holding_tickers = [holding["ticker"] for holding in current_holdings]
+                targets = list(dict.fromkeys(targets + holding_tickers))
 
-            market_data = []
-            for ticker in targets:
-                data = get_market_data(ticker)
-                if data:
-                    market_data.append(data)
-                _sleep_api()
+                market_data = []
+                for ticker in targets:
+                    data = get_market_data(ticker)
+                    if data:
+                        market_data.append(data)
+                    _sleep_api()
 
-            krw_balance = upbit.get_balance("KRW")
-            plan = build_rebalance_plan(
-                market_data=market_data,
-                market_context=market_context,
-                krw=krw_balance,
-                current_holdings=current_holdings,
-                recent_performance=recent_performance,
-                state=state,
-                now_ts=time.time(),
-            )
+                krw_balance = upbit.get_balance("KRW")
+                plan = build_rebalance_plan(
+                    market_data=market_data,
+                    market_context=market_context,
+                    krw=krw_balance,
+                    current_holdings=current_holdings,
+                    recent_performance=recent_performance,
+                    state=state,
+                    now_ts=time.time(),
+                )
 
-            logger.info(
-                "Plan: risk_mode=%s cash_reserve=%s%% buy_threshold=%s buy_budget=%s decisions=%s",
-                plan["risk_mode"],
-                plan["cash_reserve_pct"],
-                plan["buy_threshold"],
-                int(plan["buy_budget_krw"]),
-                json.dumps(plan["decisions"], ensure_ascii=False),
-            )
-            if plan["entry_rejections"]:
-                logger.info("Entry rejections: %s", json.dumps(plan["entry_rejections"], ensure_ascii=False))
-            decision_history_changed = append_decision_history(plan)
-            trade_history_changed = execute_rebalance_plan(upbit, plan, state)
+                logger.info(
+                    "Plan: risk_mode=%s cash_reserve=%s%% buy_threshold=%s buy_budget=%s decisions=%s",
+                    plan["risk_mode"],
+                    plan["cash_reserve_pct"],
+                    plan["buy_threshold"],
+                    int(plan["buy_budget_krw"]),
+                    json.dumps(plan["decisions"], ensure_ascii=False),
+                )
+                if plan["entry_rejections"]:
+                    logger.info("Entry rejections: %s", json.dumps(plan["entry_rejections"], ensure_ascii=False))
+                decision_history_changed = append_decision_history(plan)
+                trade_history_changed = execute_rebalance_plan(upbit, plan, state, acquire_lock=False)
 
             sleep_seconds = seconds_until_next_cycle()
             next_expected_cycle_at = datetime.fromtimestamp(time.time() + sleep_seconds).astimezone().isoformat(

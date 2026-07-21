@@ -26,3 +26,30 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  manual-order-api:
+    image: ai_auto_trading_bot-coin-bot:latest
+    container_name: quant-ai-manual-api
+    init: true
+    restart: always
+    environment:
+      HOME: "/tmp/bot-home"
+      BOT_UID: "${BOT_UID:-1001}"
+      BOT_GID: "${BOT_GID:-1002}"
+      TZ: "${TZ:-Asia/Seoul}"
+      UPBIT_ACCESS_KEY: "${UPBIT_ACCESS_KEY}"
+      UPBIT_SECRET_KEY: "${UPBIT_SECRET_KEY}"
+      UPBIT_HTTP_TIMEOUT_SECONDS: "${UPBIT_HTTP_TIMEOUT_SECONDS:-10}"
+      MANUAL_TRADE_ENABLED: "${MANUAL_TRADE_ENABLED:-false}"
+      MANUAL_API_PORT: "8765"
+      MANUAL_MAX_BUY_KRW: "${MANUAL_MAX_BUY_KRW:-100000}"
+    volumes:
+      - .:/app
+    command: ["sh", "/app/docker-entrypoint.sh", "python", "-u", "manual_order_api.py"]
+    ports:
+      - "127.0.0.1:8765:8765"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
