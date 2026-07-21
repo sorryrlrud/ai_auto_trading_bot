@@ -36,6 +36,7 @@ class TestScheduledTrader(unittest.TestCase):
         self.context_path = Path(self.temporary_directory.name) / "context.json"
         self.patches = [
             mock.patch.object(scheduled_trader, "ACTIVATE_AT", ""),
+            mock.patch.object(scheduled_trader, "DEACTIVATE_AT", ""),
             mock.patch.object(scheduled_trader, "TRADE_ENABLED", True),
             mock.patch.object(scheduled_trader.pyupbit, "get_current_price", return_value=10_000),
             mock.patch.object(scheduled_trader.autotrade, "_sleep_api"),
@@ -71,7 +72,7 @@ class TestScheduledTrader(unittest.TestCase):
 
     def test_same_signal_slot_only_runs_heartbeat(self):
         first = datetime(2026, 7, 22, 2, 1, tzinfo=scheduled_trader.KST)
-        second = datetime(2026, 7, 22, 2, 14, tzinfo=scheduled_trader.KST)
+        second = datetime(2026, 7, 22, 2, 4, tzinfo=scheduled_trader.KST)
         context = scheduled_trader.run_tick(
             FakeUpbit(), now=first, state_path=self.state_path, context_path=self.context_path
         )
@@ -166,6 +167,36 @@ class TestScheduledTrader(unittest.TestCase):
             )
         self.assertEqual(result["status"], "waiting_activation")
 
+    def test_deactivation_time_closes_test_window(self):
+        now = datetime(2026, 7, 21, 23, 50, tzinfo=scheduled_trader.KST)
+        scheduled_trader.save_state(
+            {
+                "session_date": "2026-07-21",
+                "status": "active",
+                "phase": 1,
+                "phase_start_equity_krw": 100_000,
+            },
+            self.state_path,
+        )
+        with mock.patch.object(
+            scheduled_trader, "DEACTIVATE_AT", "2026-07-21T23:50:00+09:00"
+        ), mock.patch.object(scheduled_trader.autotrade, "refresh_dashboard"):
+            result = scheduled_trader.run_tick(
+                FakeUpbit(), now=now, state_path=self.state_path, context_path=self.context_path
+            )
+        self.assertEqual(result["status"], "completed_test_window")
+        self.assertEqual(result["action"], "test_window_closed")
+
+    def test_llm_decision_is_rejected_after_deactivation(self):
+        now = datetime(2026, 7, 21, 23, 50, tzinfo=scheduled_trader.KST)
+        with mock.patch.object(
+            scheduled_trader, "DEACTIVATE_AT", "2026-07-21T23:50:00+09:00"
+        ):
+            with self.assertRaisesRegex(RuntimeError, "window has ended"):
+                scheduled_trader.execute_llm_decision(
+                    {}, now=now, state_path=self.state_path, context_path=self.context_path
+                )
+
     def test_failed_liquidation_is_retried_on_next_heartbeat(self):
         now = datetime(2026, 7, 22, 13, 0, tzinfo=scheduled_trader.KST)
         upbit = FakeUpbit(krw=90_000, coin_balance=1, coin_price=10_000)
@@ -203,7 +234,7 @@ class TestScheduledTrader(unittest.TestCase):
             snapshot,
         )
         self.assertEqual(plan["cash_reserve_pct"], 0)
-        self.assertEqual(plan["decision_source"], "gpt-5.6-sol/high")
+        self.assertEqual(plan["decision_source"], "gpt-5.6-sol/medium")
         self.assertEqual(plan["decisions"][0]["decision"], "BUY")
 
         with self.assertRaisesRegex(ValueError, "BUY is not allowed"):

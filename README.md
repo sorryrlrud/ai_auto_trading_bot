@@ -47,10 +47,10 @@ The session day rolls over at 02:00 KST. Every tick checks estimated account
 liquidation value. A phase closes all marketable holdings and stops at +1.0% or
 -0.75%. A stop before 12:00 KST waits until noon and starts phase 2 with a new
 baseline; a stop at or after noon ends the session until the next 02:00 rollover.
-Entry and rebalance signals are evaluated at most once per completed 15-minute
-slot, even when the scheduled task invokes the tick every minute. The tick
+Entry and rebalance signals are evaluated at most once per completed 5-minute
+slot, matching the five-minute scheduled task cadence. The tick
 returns a bounded market/account context. A local Codex scheduled run using
-`gpt-5.6-sol` with `high` reasoning chooses BUY, SELL, or HOLD and submits a
+`gpt-5.6-sol` with `medium` reasoning chooses BUY, SELL, or HOLD and submits a
 token-bound JSON decision through `execute_llm_trade_decision.sh`.
 
 Scheduled mode passes `cash_reserve_pct_override=0`, so it does not retain a
@@ -67,6 +67,10 @@ Live scheduled orders require `SCHEDULED_TRADE_ENABLED=true`. An optional
 `SCHEDULED_ACTIVATE_AT` can delay first activation. The local launchers use the
 production bot UID/GID to avoid creating root-owned runtime files in the
 bind-mounted repository.
+
+An optional `SCHEDULED_DEACTIVATE_AT` ends a bounded trading window. At or after
+that KST timestamp, no new LLM decision can execute; the next scheduled tick
+liquidates marketable holdings and records `completed_test_window`.
 
 ## Manual order API over SSH
 

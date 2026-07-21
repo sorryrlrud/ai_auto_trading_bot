@@ -65,26 +65,29 @@ docker exec quant-ai-bot date
 
 - The former always-running `coin-bot` service is behind the Compose
   `legacy-loop` profile and must remain stopped during scheduled operation.
-- A one-minute local Codex scheduled task calls `run_scheduled_tick.sh`, which connects
+- A five-minute local Codex scheduled task calls `run_scheduled_tick.sh`, which connects
   to the VM and runs one `scheduled_trader.py` tick inside
   `quant-ai-manual-api` as UID/GID `1001:1002`.
-- The scheduled task is pinned to `gpt-5.6-sol` with `high` reasoning. When a
-  15-minute signal slot needs judgment, the model reads the token-bound JSON
+- The scheduled task is pinned to `gpt-5.6-sol` with `medium` reasoning. When a
+  five-minute signal slot needs judgment, the model reads the token-bound JSON
   context and pipes one constrained JSON decision to
   `execute_llm_trade_decision.sh`.
 - `quant-ai-manual-api` mounts the host SSH directory at `/host-ssh` and receives
   the dashboard publishing settings because scheduled decisions now own
   decision/trade dashboard updates after the legacy loop was removed.
 - `scheduled_trading_state.json` holds the 02:00 KST session baseline, current
-  phase, last 15-minute signal slot, pause/completion state, and bounded event
+  phase, last five-minute signal slot, pause/completion state, and bounded event
   history. It is runtime data and must not be committed.
-- Every minute checks account-level estimated liquidation return. Market
-  scanning and LLM judgment occur only once per 15-minute slot.
+- Every five minutes checks account-level estimated liquidation return. Market
+  scanning and LLM judgment occur only once per five-minute slot.
 - Phase thresholds are +1.0% and -0.75%. A pre-noon stop liquidates and waits
   for a phase-2 restart at 12:00; a stop at/after noon or a profit target ends
   trading until the next 02:00 session.
 - Scheduled entry planning uses a 0% cash reserve plus a 0.1% fee/rounding order
   buffer.
+- A bounded test can set `SCHEDULED_DEACTIVATE_AT`; the first tick at or after
+  that time blocks new LLM execution, liquidates marketable holdings, and marks
+  the test window complete.
 
 `decision_history.json`, `trade_history.json`, `runtime_status.json`, `bot_state.json`, and `trading.log` are runtime data files and should not be committed.
 

@@ -21,13 +21,15 @@ STATE_FILE = Path(os.getenv("SCHEDULED_TRADING_STATE_FILE", "scheduled_trading_s
 LLM_CONTEXT_FILE = Path(os.getenv("SCHEDULED_LLM_CONTEXT_FILE", "scheduled_llm_context.json"))
 TRADE_ENABLED = os.getenv("SCHEDULED_TRADE_ENABLED", "false").lower() == "true"
 ACTIVATE_AT = os.getenv("SCHEDULED_ACTIVATE_AT", "").strip()
+DEACTIVATE_AT = os.getenv("SCHEDULED_DEACTIVATE_AT", "").strip()
 START_HOUR = int(os.getenv("SCHEDULED_START_HOUR", "2"))
 RESTART_HOUR = int(os.getenv("SCHEDULED_RESTART_HOUR", "12"))
 TAKE_PROFIT_PCT = float(os.getenv("SCHEDULED_TAKE_PROFIT_PCT", "1.0"))
 MAX_LOSS_PCT = float(os.getenv("SCHEDULED_MAX_LOSS_PCT", "0.75"))
-SIGNAL_INTERVAL_MINUTES = int(os.getenv("SCHEDULED_SIGNAL_INTERVAL_MINUTES", "15"))
+SIGNAL_INTERVAL_MINUTES = int(os.getenv("SCHEDULED_SIGNAL_INTERVAL_MINUTES", "5"))
 ORDER_BUFFER = float(os.getenv("SCHEDULED_ORDER_BUFFER", "0.999"))
 ESTIMATED_SELL_FEE_RATE = float(os.getenv("SCHEDULED_ESTIMATED_SELL_FEE_RATE", "0.0005"))
+DECISION_SOURCE = "gpt-5.6-sol/medium"
 
 
 def _iso(value):
@@ -389,12 +391,16 @@ def _validated_llm_plan(decision, context, snapshot):
         "entry_rejections": [],
         "risk_mode": context.get("market_context", {}).get("risk_mode", "unknown"),
         "krw": snapshot["krw"],
-        "decision_source": "gpt-5.6-sol/high",
+        "decision_source": DECISION_SOURCE,
     }
 
 
 def execute_llm_decision(decision, upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTEXT_FILE):
     now = (now or datetime.now(KST)).astimezone(KST)
+    deactivation = _parse_iso(DEACTIVATE_AT)
+    if deactivation and now >= deactivation:
+        raise RuntimeError("Scheduled trading window has ended; run the scheduled tick for liquidation")
+
     upbit = upbit or autotrade.setup_api()
     if upbit is None:
         raise RuntimeError("Upbit credentials are not configured")
@@ -439,7 +445,7 @@ def execute_llm_decision(decision, upbit=None, now=None, state_path=STATE_FILE, 
         return {
             "status": "active",
             "action": "llm_decision_executed",
-            "decision_source": "gpt-5.6-sol/high",
+            "decision_source": DECISION_SOURCE,
             "decisions": decisions,
         }
 
@@ -447,6 +453,7 @@ def execute_llm_decision(decision, upbit=None, now=None, state_path=STATE_FILE, 
 def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTEXT_FILE):
     now = (now or datetime.now(KST)).astimezone(KST)
     activation = _parse_iso(ACTIVATE_AT)
+    deactivation = _parse_iso(DEACTIVATE_AT)
     if activation and now < activation:
         return {"status": "waiting_activation", "activate_at": _iso(activation), "now": _iso(now)}
 
@@ -458,6 +465,37 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
         snapshot = account_snapshot(upbit)
         state = load_state(state_path)
         session_date = trading_day(now)
+
+        if deactivation and now >= deactivation:
+            if state.get("status") == "completed_test_window":
+                state["last_tick_at"] = _iso(now)
+                state["last_equity_krw"] = round(snapshot["liquidation_equity_krw"], 4)
+                save_state(state, state_path)
+                return {
+                    "status": "completed_test_window",
+                    "deactivate_at": _iso(deactivation),
+                    "action": "none",
+                }
+
+            baseline = autotrade.safe_float(state.get("phase_start_equity_krw"))
+            return_pct = phase_return_pct(snapshot, state) if baseline > 0 else 0.0
+            reason = f"예약매매 테스트 종료 시각 {_iso(deactivation)} 도달"
+            if state.get("pending_target_status") != "completed_test_window":
+                _record_event(state, now, "test_window_ended", return_pct=round(return_pct, 4))
+            result = complete_or_retry_liquidation(
+                upbit,
+                state,
+                state_path,
+                now,
+                "completed_test_window",
+                reason,
+                return_pct,
+            )
+            autotrade.refresh_dashboard()
+            if result["status"] == "completed_test_window":
+                result["action"] = "test_window_closed"
+            result["deactivate_at"] = _iso(deactivation)
+            return result
 
         if state.get("status") == "liquidation_pending":
             pending_session = state.get("session_date")
@@ -482,7 +520,7 @@ def run_tick(upbit=None, now=None, state_path=STATE_FILE, context_path=LLM_CONTE
             _new_phase(state, snapshot, now, session_date, phase=1)
             _record_event(state, now, "session_started", equity_krw=round(snapshot["liquidation_equity_krw"], 2))
 
-        if state.get("status") in {"completed_target", "completed_stop"}:
+        if state.get("status") in {"completed_target", "completed_stop", "completed_test_window"}:
             state["last_tick_at"] = _iso(now)
             state["last_equity_krw"] = round(snapshot["liquidation_equity_krw"], 4)
             save_state(state, state_path)
