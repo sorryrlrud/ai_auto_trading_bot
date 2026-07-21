@@ -76,6 +76,60 @@ class TestScheduledTrader(unittest.TestCase):
         self.assertEqual(result["decision_interval_minutes"], 10)
         self.assertEqual(result["daily_target_pct"], 0.5)
 
+    def test_cash_only_context_exposes_empty_decisions_as_no_trade(self):
+        now = datetime(2026, 7, 22, 8, 10, tzinfo=scheduled_trader.KST)
+        result = scheduled_trader.run_tick(
+            FakeUpbit(), now=now, state_path=self.state_path, context_path=self.context_path
+        )
+
+        constraints = result["constraints"]
+        self.assertTrue(constraints["empty_decisions_means_no_trade"])
+        self.assertTrue(constraints["hold_tickers_must_be_current_holdings"])
+        self.assertEqual(
+            constraints["allowed_decisions_by_ticker_scope"],
+            {
+                "unheld_candidate": ["BUY"],
+                "current_holding": ["SELL", "HOLD"],
+            },
+        )
+        self.assertIn("[] for no trade", result["required_decision_schema"]["decisions"])
+
+    def test_cash_only_empty_decisions_are_valid_no_trade_plan(self):
+        snapshot = scheduled_trader.account_snapshot(FakeUpbit())
+        context = {
+            "decision_token": "token-123",
+            "candidates": [{"coin": "KRW-BTC"}],
+            "market_context": {"risk_mode": "defensive"},
+        }
+
+        plan = scheduled_trader._validated_llm_plan(
+            {"decision_token": "token-123", "decisions": []},
+            context,
+            snapshot,
+        )
+
+        self.assertEqual(plan["decisions"], [])
+
+    def test_cash_only_hold_of_unowned_candidate_is_rejected(self):
+        snapshot = scheduled_trader.account_snapshot(FakeUpbit())
+        context = {
+            "decision_token": "token-123",
+            "candidates": [{"coin": "KRW-BTC"}],
+            "market_context": {"risk_mode": "defensive"},
+        }
+
+        with self.assertRaisesRegex(ValueError, "HOLD is only allowed for a current holding"):
+            scheduled_trader._validated_llm_plan(
+                {
+                    "decision_token": "token-123",
+                    "decisions": [
+                        {"ticker": "KRW-BTC", "decision": "HOLD", "reason": "현금 관망"}
+                    ],
+                },
+                context,
+                snapshot,
+            )
+
     def test_same_signal_slot_only_runs_heartbeat(self):
         first = datetime(2026, 7, 22, 2, 1, tzinfo=scheduled_trader.KST)
         second = datetime(2026, 7, 22, 2, 9, tzinfo=scheduled_trader.KST)

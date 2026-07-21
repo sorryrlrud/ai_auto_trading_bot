@@ -346,24 +346,29 @@ def build_llm_context(
         "candidates": candidates,
         "constraints": {
             "allowed_decisions": ["BUY", "SELL", "HOLD"],
+            "allowed_decisions_by_ticker_scope": {
+                "unheld_candidate": ["BUY"],
+                "current_holding": ["SELL", "HOLD"],
+            },
             "max_positions": autotrade.MAX_POSITIONS,
             "cash_reserve_pct": 0,
             "order_buffer": ORDER_BUFFER,
             "legacy_scores_and_block_reasons_are_advisory": True,
             "buy_tickers_must_be_in_candidates": True,
             "sell_tickers_must_be_current_holdings": True,
+            "hold_tickers_must_be_current_holdings": True,
+            "empty_decisions_means_no_trade": True,
             "one_decision_per_ticker": True,
             "stablecoin_like_tickers_excluded": sorted(autotrade.EXCLUDED_ENTRY_TICKERS),
         },
         "required_decision_schema": {
             "decision_token": "copy exactly",
-            "decisions": [
-                {
-                    "ticker": "KRW-BTC",
-                    "decision": "BUY|SELL|HOLD",
-                    "reason": "brief evidence-based reason",
-                }
-            ],
+            "decisions": "[] for no trade, otherwise an array of decision objects",
+            "decision_object": {
+                "ticker": "BUY: an unheld candidate; SELL or HOLD: a current holding",
+                "decision": "BUY|SELL|HOLD",
+                "reason": "brief evidence-based reason",
+            },
         },
     }
     save_llm_context(context, context_path)

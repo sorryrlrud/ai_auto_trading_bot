@@ -58,6 +58,9 @@ The LLM context identifies the 10-minute decision cadence and includes current
 daily return, remaining return to the +0.5% target, and completed daily, 1-hour,
 and 10-minute indicators. Legacy scores and block reasons are advisory; the LLM
 makes the final signal decision within the hard execution and risk constraints.
+For a no-trade decision with no current holdings, the model returns an empty
+`decisions` array. `HOLD` and `SELL` are valid only for tickers in the current
+holdings, while `BUY` is valid only for unheld context candidates.
 
 Scheduled mode passes `cash_reserve_pct_override=0`, so it does not retain a
 strategy cash reserve. `SCHEDULED_ORDER_BUFFER=0.999` keeps only a 0.1% execution
