@@ -372,6 +372,46 @@ class TestTradingLogic(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
 
+    def test_scheduled_decision_history_retains_each_signal_slot_and_metadata(self):
+        first = {
+            "decision_source": "gpt-5.6-sol/medium",
+            "decision_summary": "조건 미충족으로 관망",
+            "signal_slot": "2026-07-22T12:40:00+09:00",
+            "session_date": "2026-07-22",
+            "phase": 2,
+            "daily_return_pct": -0.1,
+            "decisions": [],
+        }
+        second = {**first, "signal_slot": "2026-07-22T12:50:00+09:00"}
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            self.assertTrue(autotrade.append_decision_history(first, path=f.name))
+            self.assertTrue(autotrade.append_decision_history(second, path=f.name))
+            rows = autotrade.load_decision_history(path=f.name)
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[-1]["decision_source"], "gpt-5.6-sol/medium")
+        self.assertEqual(rows[-1]["decision_summary"], "조건 미충족으로 관망")
+        self.assertEqual(rows[-1]["signal_slot"], "2026-07-22T12:50:00+09:00")
+
+    def test_dashboard_includes_scheduled_decision_titles_and_summaries(self):
+        html = generate_dashboard.build_html(
+            [],
+            [
+                {
+                    "recorded_at": "2026-07-22T12:50:00+09:00",
+                    "decision_source": "gpt-5.6-sol/medium",
+                    "decision_summary": "매수 조건 미충족으로 관망",
+                    "decisions": [],
+                }
+            ],
+            {},
+        )
+
+        self.assertIn("예약 매매 판단 기록", html)
+        self.assertIn("예약 매매\" : \"자동 매매 판단", html)
+        self.assertIn("매수 조건 미충족으로 관망", html)
+        self.assertIn("formatKst(entry.recorded_at)", html)
+
     def test_dashboard_refresh_logs_subprocess_diagnostics(self):
         error = autotrade.subprocess.CalledProcessError(
             returncode=1,

@@ -301,6 +301,13 @@ def mark_dashboard_refreshed(path=RUNTIME_STATUS_FILE, now=None):
 
 def _decision_snapshot_payload(plan):
     return {
+        "decision_source": plan.get("decision_source", "rule-based"),
+        "decision_summary": plan.get("decision_summary"),
+        "signal_slot": plan.get("signal_slot"),
+        "session_date": plan.get("session_date"),
+        "phase": plan.get("phase"),
+        "phase_return_pct": plan.get("phase_return_pct"),
+        "daily_return_pct": plan.get("daily_return_pct"),
         "risk_mode": plan.get("risk_mode", "unknown"),
         "cash_reserve_pct": plan.get("cash_reserve_pct"),
         "buy_threshold": plan.get("buy_threshold"),
@@ -313,6 +320,13 @@ def _decision_snapshot_payload(plan):
 
 def _decision_snapshot_signature(row):
     return {
+        "decision_source": row.get("decision_source", "rule-based"),
+        "decision_summary": row.get("decision_summary"),
+        "signal_slot": row.get("signal_slot"),
+        "session_date": row.get("session_date"),
+        "phase": row.get("phase"),
+        "phase_return_pct": row.get("phase_return_pct"),
+        "daily_return_pct": row.get("daily_return_pct"),
         "risk_mode": row.get("risk_mode", "unknown"),
         "cash_reserve_pct": row.get("cash_reserve_pct"),
         "buy_threshold": row.get("buy_threshold"),
@@ -323,13 +337,13 @@ def _decision_snapshot_signature(row):
     }
 
 
-def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=20):
+def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=100, now=None):
     rows = load_decision_history(path)
     payload = _decision_snapshot_payload(plan)
     if rows and _decision_snapshot_signature(rows[-1]) == payload:
         return False
 
-    rows.append({"recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"), **payload})
+    rows.append({"recorded_at": _iso_now(now), **payload})
     rows = rows[-keep:]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=2)

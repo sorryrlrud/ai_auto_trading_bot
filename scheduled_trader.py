@@ -363,6 +363,7 @@ def build_llm_context(
         },
         "required_decision_schema": {
             "decision_token": "copy exactly",
+            "decision_summary": "brief overall BUY/SELL/HOLD or no-trade rationale",
             "decisions": "[] for no trade, otherwise an array of decision objects",
             "decision_object": {
                 "ticker": "BUY: an unheld candidate; SELL or HOLD: a current holding",
@@ -386,6 +387,7 @@ def _validated_llm_plan(decision, context, snapshot):
     rows = decision.get("decisions")
     if not isinstance(rows, list):
         raise ValueError("LLM decisions must be a JSON array")
+    decision_summary = str(decision.get("decision_summary", "")).strip()[:500]
 
     held_tickers = {holding["ticker"] for holding in snapshot["holdings"]}
     candidate_tickers = {row["coin"] for row in context.get("candidates", [])}
@@ -430,8 +432,16 @@ def _validated_llm_plan(decision, context, snapshot):
                     "profit_pct": holding["profit_pct"],
                 }
             )
+    if not decision_summary:
+        if normalized:
+            decision_summary = "; ".join(
+                f"{row['decision']} {row['ticker']}: {row['reason']}" for row in normalized
+            )[:500]
+        else:
+            decision_summary = "매수·매도 조건 미충족으로 관망"
     return {
         "decisions": normalized,
+        "decision_summary": decision_summary,
         "cash_reserve_pct": 0,
         "buy_budget_krw": round(snapshot["krw"], 0),
         "entry_block_reason": None,
@@ -439,6 +449,11 @@ def _validated_llm_plan(decision, context, snapshot):
         "risk_mode": context.get("market_context", {}).get("risk_mode", "unknown"),
         "krw": snapshot["krw"],
         "decision_source": DECISION_SOURCE,
+        "signal_slot": context.get("signal_slot"),
+        "session_date": context.get("session_date"),
+        "phase": context.get("phase"),
+        "phase_return_pct": context.get("phase_return_pct"),
+        "daily_return_pct": context.get("daily_return_pct"),
     }
 
 
@@ -476,7 +491,7 @@ def execute_llm_decision(decision, upbit=None, now=None, state_path=STATE_FILE, 
         state["pending_signal_slot"] = None
         save_state(state, state_path)
 
-        decision_history_changed = autotrade.append_decision_history(plan)
+        decision_history_changed = autotrade.append_decision_history(plan, now=now)
         trade_history_changed = autotrade.execute_rebalance_plan(
             upbit,
             plan,

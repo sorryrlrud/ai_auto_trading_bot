@@ -109,6 +109,36 @@ class TestScheduledTrader(unittest.TestCase):
         )
 
         self.assertEqual(plan["decisions"], [])
+        self.assertEqual(plan["decision_summary"], "매수·매도 조건 미충족으로 관망")
+
+    def test_scheduled_plan_preserves_summary_and_dashboard_metadata(self):
+        snapshot = scheduled_trader.account_snapshot(FakeUpbit())
+        context = {
+            "decision_token": "token-123",
+            "signal_slot": "2026-07-22T12:50:00+09:00",
+            "session_date": "2026-07-22",
+            "phase": 2,
+            "phase_return_pct": 0.12,
+            "daily_return_pct": -0.08,
+            "candidates": [{"coin": "KRW-BTC"}],
+            "market_context": {"risk_mode": "normal"},
+        }
+
+        plan = scheduled_trader._validated_llm_plan(
+            {
+                "decision_token": "token-123",
+                "decision_summary": "단기 과열로 신규 매수를 보류",
+                "decisions": [],
+            },
+            context,
+            snapshot,
+        )
+
+        self.assertEqual(plan["decision_summary"], "단기 과열로 신규 매수를 보류")
+        self.assertEqual(plan["signal_slot"], "2026-07-22T12:50:00+09:00")
+        self.assertEqual(plan["session_date"], "2026-07-22")
+        self.assertEqual(plan["phase"], 2)
+        self.assertEqual(plan["daily_return_pct"], -0.08)
 
     def test_cash_only_hold_of_unowned_candidate_is_rejected(self):
         snapshot = scheduled_trader.account_snapshot(FakeUpbit())

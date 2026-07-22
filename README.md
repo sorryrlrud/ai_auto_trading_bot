@@ -10,7 +10,7 @@ Rule-based Upbit trading bot with a static realized-performance dashboard.
 python3 generate_dashboard.py
 ```
 
-The dashboard shows only explicit completed sell-side trades (`side="SELL"`) plus the latest three rebalance decision snapshots. Ambiguous legacy rows that merely have a date/ticker/profit field are ignored so stale local history cannot inflate the public totals. Open positions, balances, and secrets are not published.
+The dashboard shows only explicit completed sell-side trades (`side="SELL"`) plus up to 50 recent decision snapshots. Scheduled decision cards include their KST date/time, session metadata, and the overall BUY/SELL/HOLD or no-trade rationale. Ambiguous legacy rows that merely have a date/ticker/profit field are ignored so stale local history cannot inflate the public totals. Open positions, balances, and secrets are not published.
 
 To expose the page through GitHub Pages:
 
@@ -52,7 +52,9 @@ Entry and rebalance signals are evaluated at most once per completed 10-minute
 slot, matching the ten-minute scheduled task cadence. The tick
 returns a bounded market/account context. A local Codex scheduled run using
 `gpt-5.6-sol` with `medium` reasoning chooses BUY, SELL, or HOLD and submits a
-token-bound JSON decision through `execute_llm_trade_decision.sh`.
+token-bound JSON decision plus an overall decision summary through
+`execute_llm_trade_decision.sh`. Every scheduled signal slot is retained in the
+dashboard history, including no-trade decisions.
 
 The LLM context identifies the 10-minute decision cadence and includes current
 daily return, remaining return to the +0.5% target, and completed daily, 1-hour,
