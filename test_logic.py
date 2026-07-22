@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest import mock
 
 import pandas as pd
@@ -411,6 +412,24 @@ class TestTradingLogic(unittest.TestCase):
         self.assertIn("예약 매매\" : \"자동 매매 판단", html)
         self.assertIn("매수 조건 미충족으로 관망", html)
         self.assertIn("formatKst(entry.recorded_at)", html)
+
+    def test_dashboard_recognizes_legacy_scheduled_decisions(self):
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            json.dump(
+                [
+                    {
+                        "recorded_at": "2026-07-22T12:10:00+09:00",
+                        "cash_reserve_pct": 0,
+                        "buy_threshold": None,
+                        "decisions": [{"ticker": "KRW-ADA", "decision": "BUY"}],
+                    }
+                ],
+                f,
+            )
+            f.flush()
+            rows = generate_dashboard.load_recent_decisions(path=Path(f.name))
+
+        self.assertEqual(rows[0]["decision_source"], "scheduled-legacy")
 
     def test_dashboard_refresh_logs_subprocess_diagnostics(self):
         error = autotrade.subprocess.CalledProcessError(

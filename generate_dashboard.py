@@ -58,7 +58,21 @@ def load_recent_decisions(path=DECISION_HISTORY_FILE, limit=50):
 
     if not isinstance(rows, list):
         return []
-    return rows[-limit:]
+    recent = []
+    for row in rows[-limit:]:
+        if not isinstance(row, dict):
+            continue
+        normalized = dict(row)
+        if (
+            not normalized.get("decision_source")
+            and normalized.get("cash_reserve_pct") == 0
+            and normalized.get("buy_threshold") is None
+        ):
+            # Scheduled snapshots created before decision_source was persisted
+            # still have this strategy-specific reserve/threshold combination.
+            normalized["decision_source"] = "scheduled-legacy"
+        recent.append(normalized)
+    return recent
 
 
 def load_runtime_status(path=RUNTIME_STATUS_FILE):
@@ -489,7 +503,8 @@ def build_html(trades, recent_decisions, runtime_status):
         card.className = "decision-card";
         const title = document.createElement("h3");
         title.className = "decision-title";
-        const isScheduled = String(entry.decision_source || "").startsWith("gpt-");
+        const decisionSource = String(entry.decision_source || "");
+        const isScheduled = decisionSource === "scheduled-legacy" || decisionSource.startsWith("gpt-");
         title.textContent = `${{isScheduled ? "예약 매매" : "자동 매매 판단"}} · ${{formatKst(entry.recorded_at)}} KST`;
         card.appendChild(title);
         const meta = document.createElement("div");
