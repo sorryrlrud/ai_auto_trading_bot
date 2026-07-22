@@ -39,9 +39,5 @@ setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
 setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
   env HOME="$HOME" git config --global gc.autoDetach false
 
-if [ "$#" -eq 0 ]; then
-  set -- python -u autotrade.py
-fi
-
 exec setpriv --reuid="$BOT_UID" --regid="$BOT_GID" --clear-groups \
-  env HOME="$HOME" "$@"
+  env HOME="$HOME" python -u autotrade.py

@@ -3,11 +3,8 @@ import logging
 import os
 import subprocess
 import time
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import wraps
-
-import fcntl
 
 import pandas as pd
 import pandas_ta as ta  # registers the df.ta accessor
@@ -30,10 +27,11 @@ load_dotenv()
 
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
-LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "600"))
+LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
 API_CALL_SLEEP_SECONDS = float(os.getenv("API_CALL_SLEEP_SECONDS", "0.12"))
 UPBIT_HTTP_TIMEOUT_SECONDS = float(os.getenv("UPBIT_HTTP_TIMEOUT_SECONDS", "10"))
 MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "3"))
+MAX_SINGLE_POSITION_PCT = float(os.getenv("MAX_SINGLE_POSITION_PCT", "25.0"))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-2.2"))
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "3.2"))
 PROFIT_PROTECT_PCT = float(os.getenv("PROFIT_PROTECT_PCT", "1.2"))
@@ -57,7 +55,6 @@ TRADE_HISTORY_FILE = "trade_history.json"
 DECISION_HISTORY_FILE = "decision_history.json"
 BOT_STATE_FILE = "bot_state.json"
 RUNTIME_STATUS_FILE = "runtime_status.json"
-TRADE_EXECUTION_LOCK_FILE = os.getenv("TRADE_EXECUTION_LOCK_FILE", ".trade_execution.lock")
 ENTRY_STATE_FIELDS = ("entry_volume", "entry_funds_krw", "entry_fee_krw")
 
 _ORIGINAL_REQUESTS_METHODS = {name: getattr(requests, name) for name in ("get", "post", "delete")}
@@ -83,18 +80,6 @@ def configure_http_timeouts(timeout_seconds=UPBIT_HTTP_TIMEOUT_SECONDS):
 
 
 configure_http_timeouts()
-
-
-@contextmanager
-def trade_execution_lock(path=TRADE_EXECUTION_LOCK_FILE, blocking=True):
-    """Serialize orders across the automatic bot and the manual API."""
-    with open(path, "a+", encoding="utf-8") as lock_file:
-        operation = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
-        fcntl.flock(lock_file.fileno(), operation)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def safe_float(value, default=0.0):
@@ -301,15 +286,9 @@ def mark_dashboard_refreshed(path=RUNTIME_STATUS_FILE, now=None):
 
 def _decision_snapshot_payload(plan):
     return {
-        "decision_source": plan.get("decision_source", "rule-based"),
-        "decision_summary": plan.get("decision_summary"),
-        "signal_slot": plan.get("signal_slot"),
-        "session_date": plan.get("session_date"),
-        "phase": plan.get("phase"),
-        "phase_return_pct": plan.get("phase_return_pct"),
-        "daily_return_pct": plan.get("daily_return_pct"),
         "risk_mode": plan.get("risk_mode", "unknown"),
         "cash_reserve_pct": plan.get("cash_reserve_pct"),
+        "max_single_position_pct": plan.get("max_single_position_pct"),
         "buy_threshold": plan.get("buy_threshold"),
         "buy_budget_krw": plan.get("buy_budget_krw"),
         "entry_block_reason": plan.get("entry_block_reason"),
@@ -320,15 +299,9 @@ def _decision_snapshot_payload(plan):
 
 def _decision_snapshot_signature(row):
     return {
-        "decision_source": row.get("decision_source", "rule-based"),
-        "decision_summary": row.get("decision_summary"),
-        "signal_slot": row.get("signal_slot"),
-        "session_date": row.get("session_date"),
-        "phase": row.get("phase"),
-        "phase_return_pct": row.get("phase_return_pct"),
-        "daily_return_pct": row.get("daily_return_pct"),
         "risk_mode": row.get("risk_mode", "unknown"),
         "cash_reserve_pct": row.get("cash_reserve_pct"),
+        "max_single_position_pct": row.get("max_single_position_pct"),
         "buy_threshold": row.get("buy_threshold"),
         "buy_budget_krw": row.get("buy_budget_krw"),
         "entry_block_reason": row.get("entry_block_reason"),
@@ -337,13 +310,13 @@ def _decision_snapshot_signature(row):
     }
 
 
-def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=100, now=None):
+def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=20):
     rows = load_decision_history(path)
     payload = _decision_snapshot_payload(plan)
     if rows and _decision_snapshot_signature(rows[-1]) == payload:
         return False
 
-    rows.append({"recorded_at": _iso_now(now), **payload})
+    rows.append({"recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"), **payload})
     rows = rows[-keep:]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=2)
@@ -517,15 +490,15 @@ def get_market_data(ticker):
 
         df_1h = pyupbit.get_ohlcv(ticker, interval="minute60", count=80)
         _sleep_api()
-        df_10m = pyupbit.get_ohlcv(ticker, interval="minute10", count=80)
+        df_15m = pyupbit.get_ohlcv(ticker, interval="minute15", count=80)
         _sleep_api()
-        if df_1h is None or len(df_1h) < 30 or df_10m is None or len(df_10m) < 30:
+        if df_1h is None or len(df_1h) < 30 or df_15m is None or len(df_15m) < 30:
             return None
 
         df = _completed_candles(df, min_rows=60)
         df_1h = _completed_candles(df_1h, min_rows=30)
-        df_10m = _completed_candles(df_10m, min_rows=30)
-        if df is None or df_1h is None or df_10m is None:
+        df_15m = _completed_candles(df_15m, min_rows=30)
+        if df is None or df_1h is None or df_15m is None:
             return None
 
         df = _add_basic_indicators(df)
@@ -533,7 +506,7 @@ def get_market_data(ticker):
         df["MA_20"] = df["close"].rolling(20).mean()
         df["MA_60"] = df["close"].rolling(60).mean()
         df_1h = _add_basic_indicators(df_1h)
-        df_10m = _add_basic_indicators(df_10m)
+        df_15m = _add_basic_indicators(df_15m)
 
         current_price = pyupbit.get_current_price(ticker)
         _sleep_api()
@@ -543,7 +516,7 @@ def get_market_data(ticker):
         volume_ratio = finite_float(df["volume"].iloc[-1] / df["volume"].rolling(20).mean().iloc[-1], 1.0)
         price_change_1d = finite_float(df["close"].pct_change().iloc[-1] * 100)
         price_change_3d = finite_float((df["close"].iloc[-1] / df["close"].iloc[-4] - 1) * 100)
-        price_change_1h = finite_float((df_10m["close"].iloc[-1] / df_10m["close"].iloc[-7] - 1) * 100)
+        price_change_1h = finite_float((df_15m["close"].iloc[-1] / df_15m["close"].iloc[-5] - 1) * 100)
         price_change_6h = finite_float((df_1h["close"].iloc[-1] / df_1h["close"].iloc[-7] - 1) * 100)
         ma20 = finite_float(df["MA_20"].iloc[-1])
         ma60 = finite_float(df["MA_60"].iloc[-1])
@@ -573,7 +546,7 @@ def get_market_data(ticker):
                     "bb_position": round(finite_float(bb_position, 0.5), 2),
                 },
                 "1h": _trend_snapshot(df_1h),
-                "10m": _trend_snapshot(df_10m),
+                "15m": _trend_snapshot(df_15m),
             },
         }
     except Exception as e:
@@ -671,7 +644,7 @@ def buy_score_threshold(market_context, recent_performance):
 def entry_block_reason(data, market_context):
     daily = data["indicators"]["daily"]
     hour = data["indicators"]["1h"]
-    minute = data["indicators"]["10m"]
+    minute = data["indicators"]["15m"]
 
     if data["coin"] in EXCLUDED_ENTRY_TICKERS:
         return "전략 제외 종목"
@@ -686,7 +659,7 @@ def entry_block_reason(data, market_context):
     if not (hour["ma5_over_long"] and hour["price_over_long"] and hour["macd_hist"] > 0):
         return "1시간 추세 미정렬"
     if not (minute["ma5_over_long"] and minute["price_over_long"] and minute["macd_hist"] > 0):
-        return "10분 추세 미정렬"
+        return "15분 추세 미정렬"
     if daily["rsi"] > 72 or hour["rsi"] > 75 or minute["rsi"] > 78:
         return "과열 구간"
     if data["volume_ratio"] > 5 or data["price_change_1d"] > 12 or data["price_change_1h"] > 7:
@@ -697,7 +670,7 @@ def entry_block_reason(data, market_context):
 def score_coin(data, market_context):
     daily = data["indicators"]["daily"]
     hour = data["indicators"]["1h"]
-    minute = data["indicators"]["10m"]
+    minute = data["indicators"]["15m"]
     rsi = daily["rsi"]
     score = 0.0
     reasons = []
@@ -745,19 +718,19 @@ def score_coin(data, market_context):
 
     if minute["ma5_over_long"]:
         score += 1.0
-        reasons.append("10m MA5>MA20")
+        reasons.append("15m MA5>MA20")
     if minute["price_over_long"]:
         score += 1.0
-        reasons.append("10m price>MA20")
+        reasons.append("15m price>MA20")
     if minute["macd_hist"] > 0:
         score += 1.0
-        reasons.append("10m MACD+")
+        reasons.append("15m MACD+")
     if 45 <= minute["rsi"] <= 70:
         score += 0.75
-        reasons.append("10m RSI ok")
+        reasons.append("15m RSI ok")
     elif minute["rsi"] > 78:
         score -= 1.5
-        reasons.append("10m overheated")
+        reasons.append("15m overheated")
 
     volume_ratio = data["volume_ratio"]
     if 1.2 <= volume_ratio <= 3.5:
@@ -788,7 +761,7 @@ def score_coin(data, market_context):
         score += 0.5
         reasons.append("6h move controlled")
 
-    if data["atr_pct"] > 12:
+    if data["atr_pct"] > MAX_ENTRY_ATR_PCT:
         score -= 1.0
         reasons.append("ATR too high")
 
@@ -829,7 +802,7 @@ def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
 
     daily = data["indicators"]["daily"]
     hour = data["indicators"]["1h"]
-    minute = data["indicators"]["10m"]
+    minute = data["indicators"]["15m"]
     trend_broken = not daily["price_over_ma20"] and not daily["ma5_over_20"] and daily["macd_hist"] < 0
     hour_broken = not hour["price_over_long"] and not hour["ma5_over_long"] and hour["macd_hist"] < 0
     short_broken = not minute["price_over_long"] and not minute["ma5_over_long"] and minute["macd_hist"] < 0
@@ -839,11 +812,11 @@ def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
     if profit_pct >= TAKE_PROFIT_PCT and (overheated or intraday_overheated or short_broken):
         return True, f"수익 {profit_pct}% 및 과열 신호로 익절"
     if profit_pct >= PROFIT_PROTECT_PCT and short_broken:
-        return True, f"수익 {profit_pct}% 보호: 10분 추세 훼손"
+        return True, f"수익 {profit_pct}% 보호: 15분 추세 훼손"
     if age is not None and age < MIN_HOLD_SECONDS and profit_pct > STOP_LOSS_PCT:
         return False, f"최소 보유시간 유지({int(age)}초/{MIN_HOLD_SECONDS}초)"
     if profit_pct < -0.7 and short_broken and hour_broken:
-        return True, f"손실 {profit_pct}% 및 10분/1시간 추세 동반 훼손"
+        return True, f"손실 {profit_pct}% 및 15분/1시간 추세 동반 훼손"
     if profit_pct < 0 and trend_broken:
         return True, f"손실 {profit_pct}% 상태에서 추세 훼손"
     if market_context.get("risk_mode") == "defensive" and (trend_broken or hour_broken):
@@ -852,24 +825,11 @@ def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
     return False, "보유 추세 유지"
 
 
-def build_rebalance_plan(
-    market_data,
-    market_context,
-    krw,
-    current_holdings,
-    recent_performance,
-    state=None,
-    now_ts=None,
-    cash_reserve_pct_override=None,
-):
+def build_rebalance_plan(market_data, market_context, krw, current_holdings, recent_performance, state=None, now_ts=None):
     state = state or {"trades": {}}
     now_ts = now_ts or time.time()
     data_by_ticker = {row["coin"]: row for row in market_data}
-    reserve_pct = (
-        cash_reserve_pct(market_context, recent_performance)
-        if cash_reserve_pct_override is None
-        else max(min(float(cash_reserve_pct_override), 100.0), 0.0)
-    )
+    reserve_pct = cash_reserve_pct(market_context, recent_performance)
     threshold = buy_score_threshold(market_context, recent_performance)
     decisions = []
     entry_rejections = []
@@ -902,7 +862,8 @@ def build_rebalance_plan(
     remaining_value = sum(holding["value"] for holding in current_holdings if holding["ticker"] not in sell_tickers)
     portfolio_value = krw + sum(holding["value"] for holding in current_holdings)
     max_invested_value = portfolio_value * (1 - reserve_pct / 100)
-    buy_budget_krw = max(max_invested_value - remaining_value, 0)
+    available_buy_budget_krw = max(max_invested_value - remaining_value, 0)
+    max_single_position_krw = portfolio_value * MAX_SINGLE_POSITION_PCT / 100
 
     scored = []
     for row in market_data:
@@ -922,7 +883,8 @@ def build_rebalance_plan(
             scored.append({"ticker": ticker, "score": score, "reason": reason})
 
     scored.sort(key=lambda x: x["score"], reverse=True)
-    for candidate in scored[:buy_slots]:
+    selected_candidates = scored[:buy_slots]
+    for candidate in selected_candidates:
         decisions.append(
             {
                 "ticker": candidate["ticker"],
@@ -932,12 +894,18 @@ def build_rebalance_plan(
             }
         )
 
+    buy_budget_krw = min(
+        available_buy_budget_krw,
+        max_single_position_krw * len(selected_candidates),
+    )
+
     entry_rejections.sort(key=lambda x: x["score"], reverse=True)
     entry_rejections = entry_rejections[:MAX_RECORDED_ENTRY_REJECTIONS]
 
     return {
         "decisions": decisions,
         "cash_reserve_pct": reserve_pct,
+        "max_single_position_pct": MAX_SINGLE_POSITION_PCT,
         "buy_threshold": round(threshold, 2),
         "buy_budget_krw": round(buy_budget_krw, 0),
         "entry_block_reason": entry_gate,
@@ -953,26 +921,7 @@ def seconds_until_next_cycle(now_ts=None, interval_seconds=LOOP_SLEEP_SECONDS, b
     return max(next_boundary - now_ts, 1)
 
 
-def execute_rebalance_plan(
-    upbit,
-    plan,
-    state=None,
-    acquire_lock=True,
-    order_buffer=ORDER_BUFFER,
-    trade_enabled=None,
-):
-    trade_enabled = TRADE_ENABLED if trade_enabled is None else bool(trade_enabled)
-    if acquire_lock:
-        with trade_execution_lock():
-            return execute_rebalance_plan(
-                upbit,
-                plan,
-                state,
-                acquire_lock=False,
-                order_buffer=order_buffer,
-                trade_enabled=trade_enabled,
-            )
-
+def execute_rebalance_plan(upbit, plan, state=None):
     state = state or {"trades": {}}
     state.setdefault("trades", {})
     decisions = plan.get("decisions", [])
@@ -990,7 +939,7 @@ def execute_rebalance_plan(
         balance = upbit.get_balance(ticker.split("-")[1])
         current_price = pyupbit.get_current_price(ticker)
         if balance and current_price and balance * current_price >= MIN_ORDER_KRW:
-            if not trade_enabled:
+            if not TRADE_ENABLED:
                 logger.info(f"[DRY RUN SELL] {ticker} | {decision['reason']}")
                 continue
             logger.info(f"[SELL] {ticker} | {decision['reason']}")
@@ -1021,12 +970,12 @@ def execute_rebalance_plan(
     buy_targets = [d for d in decisions if d["decision"] == "BUY"]
 
     if buy_targets and investable_krw >= MIN_ORDER_KRW:
-        amount_per_coin = (investable_krw * order_buffer) / len(buy_targets)
+        amount_per_coin = (investable_krw * ORDER_BUFFER) / len(buy_targets)
         for decision in buy_targets:
             if amount_per_coin < MIN_ORDER_KRW:
                 logger.info(f"[BUY SKIP] {decision['ticker']} | order amount below minimum")
                 continue
-            if not trade_enabled:
+            if not TRADE_ENABLED:
                 logger.info(f"[DRY RUN BUY] {decision['ticker']} {int(amount_per_coin)} KRW | {decision['reason']}")
                 continue
             result = upbit.buy_market_order(decision["ticker"], amount_per_coin)
@@ -1066,45 +1015,44 @@ def main():
             logger.info("\n--- 리밸런싱 사이클 시작 ---")
             mark_cycle_started()
 
-            with trade_execution_lock():
-                recent_performance = load_recent_performance()
-                state = load_bot_state()
-                current_holdings = get_current_holdings(upbit)
-                market_context = get_market_context()
-                targets = get_top_volume_targets(limit=25)
-                holding_tickers = [holding["ticker"] for holding in current_holdings]
-                targets = list(dict.fromkeys(targets + holding_tickers))
+            recent_performance = load_recent_performance()
+            state = load_bot_state()
+            current_holdings = get_current_holdings(upbit)
+            market_context = get_market_context()
+            targets = get_top_volume_targets(limit=25)
+            holding_tickers = [holding["ticker"] for holding in current_holdings]
+            targets = list(dict.fromkeys(targets + holding_tickers))
 
-                market_data = []
-                for ticker in targets:
-                    data = get_market_data(ticker)
-                    if data:
-                        market_data.append(data)
-                    _sleep_api()
+            market_data = []
+            for ticker in targets:
+                data = get_market_data(ticker)
+                if data:
+                    market_data.append(data)
+                _sleep_api()
 
-                krw_balance = upbit.get_balance("KRW")
-                plan = build_rebalance_plan(
-                    market_data=market_data,
-                    market_context=market_context,
-                    krw=krw_balance,
-                    current_holdings=current_holdings,
-                    recent_performance=recent_performance,
-                    state=state,
-                    now_ts=time.time(),
-                )
+            krw_balance = upbit.get_balance("KRW")
+            plan = build_rebalance_plan(
+                market_data=market_data,
+                market_context=market_context,
+                krw=krw_balance,
+                current_holdings=current_holdings,
+                recent_performance=recent_performance,
+                state=state,
+                now_ts=time.time(),
+            )
 
-                logger.info(
-                    "Plan: risk_mode=%s cash_reserve=%s%% buy_threshold=%s buy_budget=%s decisions=%s",
-                    plan["risk_mode"],
-                    plan["cash_reserve_pct"],
-                    plan["buy_threshold"],
-                    int(plan["buy_budget_krw"]),
-                    json.dumps(plan["decisions"], ensure_ascii=False),
-                )
-                if plan["entry_rejections"]:
-                    logger.info("Entry rejections: %s", json.dumps(plan["entry_rejections"], ensure_ascii=False))
-                decision_history_changed = append_decision_history(plan)
-                trade_history_changed = execute_rebalance_plan(upbit, plan, state, acquire_lock=False)
+            logger.info(
+                "Plan: risk_mode=%s cash_reserve=%s%% buy_threshold=%s buy_budget=%s decisions=%s",
+                plan["risk_mode"],
+                plan["cash_reserve_pct"],
+                plan["buy_threshold"],
+                int(plan["buy_budget_krw"]),
+                json.dumps(plan["decisions"], ensure_ascii=False),
+            )
+            if plan["entry_rejections"]:
+                logger.info("Entry rejections: %s", json.dumps(plan["entry_rejections"], ensure_ascii=False))
+            decision_history_changed = append_decision_history(plan)
+            trade_history_changed = execute_rebalance_plan(upbit, plan, state)
 
             sleep_seconds = seconds_until_next_cycle()
             next_expected_cycle_at = datetime.fromtimestamp(time.time() + sleep_seconds).astimezone().isoformat(

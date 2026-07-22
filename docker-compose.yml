@@ -1,6 +1,5 @@
 services:
   coin-bot:
-    profiles: ["legacy-loop"]
     build: .
     container_name: quant-ai-bot
     init: true
@@ -14,7 +13,7 @@ services:
       UPBIT_SECRET_KEY: "${UPBIT_SECRET_KEY}"
       TRADE_ENABLED: "${TRADE_ENABLED:-false}"
       RUN_ONCE: "${RUN_ONCE:-false}"
-      LOOP_SLEEP_SECONDS: "${LOOP_SLEEP_SECONDS:-600}"
+      LOOP_SLEEP_SECONDS: "${LOOP_SLEEP_SECONDS:-900}"
       UPBIT_HTTP_TIMEOUT_SECONDS: "${UPBIT_HTTP_TIMEOUT_SECONDS:-10}"
       DASHBOARD_AUTO_PUBLISH: "${DASHBOARD_AUTO_PUBLISH:-false}"
       DASHBOARD_HEARTBEAT_PUBLISH_SECONDS: "${DASHBOARD_HEARTBEAT_PUBLISH_SECONDS:-3600}"
@@ -22,46 +21,6 @@ services:
       - .:/app
       - ${HOME}/.ssh:/host-ssh:ro
     command: ["sh", "/app/docker-entrypoint.sh"]
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  manual-order-api:
-    image: ai_auto_trading_bot-coin-bot:latest
-    container_name: quant-ai-manual-api
-    init: true
-    restart: always
-    environment:
-      HOME: "/tmp/bot-home"
-      BOT_UID: "${BOT_UID:-1001}"
-      BOT_GID: "${BOT_GID:-1002}"
-      TZ: "${TZ:-Asia/Seoul}"
-      UPBIT_ACCESS_KEY: "${UPBIT_ACCESS_KEY}"
-      UPBIT_SECRET_KEY: "${UPBIT_SECRET_KEY}"
-      UPBIT_HTTP_TIMEOUT_SECONDS: "${UPBIT_HTTP_TIMEOUT_SECONDS:-10}"
-      DASHBOARD_AUTO_PUBLISH: "${DASHBOARD_AUTO_PUBLISH:-false}"
-      DASHBOARD_HEARTBEAT_PUBLISH_SECONDS: "${DASHBOARD_HEARTBEAT_PUBLISH_SECONDS:-3600}"
-      MANUAL_TRADE_ENABLED: "${MANUAL_TRADE_ENABLED:-false}"
-      MANUAL_API_PORT: "8765"
-      MANUAL_MAX_BUY_KRW: "${MANUAL_MAX_BUY_KRW:-100000}"
-      SCHEDULED_TRADE_ENABLED: "${SCHEDULED_TRADE_ENABLED:-false}"
-      SCHEDULED_ACTIVATE_AT: "${SCHEDULED_ACTIVATE_AT:-}"
-      SCHEDULED_DEACTIVATE_AT: "${SCHEDULED_DEACTIVATE_AT:-}"
-      SCHEDULED_START_HOUR: "${SCHEDULED_START_HOUR:-2}"
-      SCHEDULED_RESTART_HOUR: "${SCHEDULED_RESTART_HOUR:-12}"
-      SCHEDULED_TAKE_PROFIT_PCT: "${SCHEDULED_TAKE_PROFIT_PCT:-0.5}"
-      SCHEDULED_MAX_LOSS_PCT: "${SCHEDULED_MAX_LOSS_PCT:-0.4}"
-      SCHEDULED_SIGNAL_INTERVAL_MINUTES: "${SCHEDULED_SIGNAL_INTERVAL_MINUTES:-10}"
-      SCHEDULED_ORDER_BUFFER: "${SCHEDULED_ORDER_BUFFER:-0.999}"
-      SCHEDULED_ESTIMATED_SELL_FEE_RATE: "${SCHEDULED_ESTIMATED_SELL_FEE_RATE:-0.0005}"
-    volumes:
-      - .:/app
-      - ${HOME}/.ssh:/host-ssh:ro
-    command: ["sh", "/app/docker-entrypoint.sh", "python", "-u", "manual_order_api.py"]
-    ports:
-      - "127.0.0.1:8765:8765"
     logging:
       driver: "json-file"
       options:

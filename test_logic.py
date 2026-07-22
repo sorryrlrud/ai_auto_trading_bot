@@ -2,7 +2,6 @@ import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest import mock
 
 import pandas as pd
@@ -38,7 +37,7 @@ def sample_market_row(ticker="KRW-ETH", **overrides):
                 "price_over_long": True,
                 "volume_ratio": 1.4,
             },
-            "10m": {
+            "15m": {
                 "rsi": 58,
                 "macd_hist": 2,
                 "ma5_over_long": True,
@@ -55,19 +54,11 @@ def sample_market_row(ticker="KRW-ETH", **overrides):
         elif key.startswith("hour_"):
             row["indicators"]["1h"][key.replace("hour_", "")] = value
         elif key.startswith("minute_"):
-            row["indicators"]["10m"][key.replace("minute_", "")] = value
+            row["indicators"]["15m"][key.replace("minute_", "")] = value
     return row
 
 
 class TestTradingLogic(unittest.TestCase):
-    def test_trade_execution_lock_can_fail_fast_for_overlapping_tick(self):
-        with tempfile.TemporaryDirectory() as directory:
-            lock_path = f"{directory}/trade.lock"
-            with autotrade.trade_execution_lock(path=lock_path):
-                with self.assertRaises(BlockingIOError):
-                    with autotrade.trade_execution_lock(path=lock_path, blocking=False):
-                        self.fail("overlapping non-blocking lock unexpectedly succeeded")
-
     def test_dashboard_publisher_retries_pending_commit_before_new_commit(self):
         with mock.patch.object(publish_dashboard, "pending_commit_count", return_value=1), mock.patch.object(
             publish_dashboard, "has_dashboard_changes", return_value=True
@@ -373,64 +364,6 @@ class TestTradingLogic(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
 
-    def test_scheduled_decision_history_retains_each_signal_slot_and_metadata(self):
-        first = {
-            "decision_source": "gpt-5.6-sol/medium",
-            "decision_summary": "조건 미충족으로 관망",
-            "signal_slot": "2026-07-22T12:40:00+09:00",
-            "session_date": "2026-07-22",
-            "phase": 2,
-            "daily_return_pct": -0.1,
-            "decisions": [],
-        }
-        second = {**first, "signal_slot": "2026-07-22T12:50:00+09:00"}
-        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
-            self.assertTrue(autotrade.append_decision_history(first, path=f.name))
-            self.assertTrue(autotrade.append_decision_history(second, path=f.name))
-            rows = autotrade.load_decision_history(path=f.name)
-
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[-1]["decision_source"], "gpt-5.6-sol/medium")
-        self.assertEqual(rows[-1]["decision_summary"], "조건 미충족으로 관망")
-        self.assertEqual(rows[-1]["signal_slot"], "2026-07-22T12:50:00+09:00")
-
-    def test_dashboard_includes_scheduled_decision_titles_and_summaries(self):
-        html = generate_dashboard.build_html(
-            [],
-            [
-                {
-                    "recorded_at": "2026-07-22T12:50:00+09:00",
-                    "decision_source": "gpt-5.6-sol/medium",
-                    "decision_summary": "매수 조건 미충족으로 관망",
-                    "decisions": [],
-                }
-            ],
-            {},
-        )
-
-        self.assertIn("예약 매매 판단 기록", html)
-        self.assertIn("예약 매매\" : \"자동 매매 판단", html)
-        self.assertIn("매수 조건 미충족으로 관망", html)
-        self.assertIn("formatKst(entry.recorded_at)", html)
-
-    def test_dashboard_recognizes_legacy_scheduled_decisions(self):
-        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
-            json.dump(
-                [
-                    {
-                        "recorded_at": "2026-07-22T12:10:00+09:00",
-                        "cash_reserve_pct": 0,
-                        "buy_threshold": None,
-                        "decisions": [{"ticker": "KRW-ADA", "decision": "BUY"}],
-                    }
-                ],
-                f,
-            )
-            f.flush()
-            rows = generate_dashboard.load_recent_decisions(path=Path(f.name))
-
-        self.assertEqual(rows[0]["decision_source"], "scheduled-legacy")
-
     def test_dashboard_refresh_logs_subprocess_diagnostics(self):
         error = autotrade.subprocess.CalledProcessError(
             returncode=1,
@@ -563,6 +496,21 @@ class TestTradingLogic(unittest.TestCase):
         buys = [d for d in plan["decisions"] if d["decision"] == "BUY"]
         self.assertEqual(len(buys), 1)
         self.assertEqual(buys[0]["ticker"], "KRW-STRONG")
+        self.assertEqual(plan["buy_budget_krw"], 25000)
+        self.assertEqual(plan["max_single_position_pct"], 25.0)
+
+    def test_multiple_candidates_each_respect_single_position_cap(self):
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-A"), sample_market_row("KRW-B")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+
+        buys = [decision for decision in plan["decisions"] if decision["decision"] == "BUY"]
+        self.assertEqual(len(buys), 2)
+        self.assertEqual(plan["buy_budget_krw"], 50000)
 
     def test_buy_budget_respects_total_portfolio_exposure(self):
         holding = {
@@ -582,18 +530,6 @@ class TestTradingLogic(unittest.TestCase):
         )
         self.assertEqual(plan["cash_reserve_pct"], 25)
         self.assertEqual(plan["buy_budget_krw"], 0)
-
-    def test_scheduled_plan_can_disable_cash_reserve(self):
-        plan = autotrade.build_rebalance_plan(
-            market_data=[sample_market_row("KRW-STRONG")],
-            market_context={"risk_mode": "normal", "market_volatility": "normal"},
-            krw=100000,
-            current_holdings=[],
-            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
-            cash_reserve_pct_override=0,
-        )
-        self.assertEqual(plan["cash_reserve_pct"], 0)
-        self.assertEqual(plan["buy_budget_krw"], 100000)
 
     def test_buy_cooldown_blocks_recently_traded_ticker(self):
         now_ts = 10_000

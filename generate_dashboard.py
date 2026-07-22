@@ -50,7 +50,7 @@ def load_realized_trades(path=TRADE_HISTORY_FILE):
     return trades
 
 
-def load_recent_decisions(path=DECISION_HISTORY_FILE, limit=50):
+def load_recent_decisions(path=DECISION_HISTORY_FILE, limit=3):
     try:
         rows = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
@@ -58,21 +58,7 @@ def load_recent_decisions(path=DECISION_HISTORY_FILE, limit=50):
 
     if not isinstance(rows, list):
         return []
-    recent = []
-    for row in rows[-limit:]:
-        if not isinstance(row, dict):
-            continue
-        normalized = dict(row)
-        if (
-            not normalized.get("decision_source")
-            and normalized.get("cash_reserve_pct") == 0
-            and normalized.get("buy_threshold") is None
-        ):
-            # Scheduled snapshots created before decision_source was persisted
-            # still have this strategy-specific reserve/threshold combination.
-            normalized["decision_source"] = "scheduled-legacy"
-        recent.append(normalized)
-    return recent
+    return rows[-limit:]
 
 
 def load_runtime_status(path=RUNTIME_STATUS_FILE):
@@ -235,14 +221,6 @@ def build_html(trades, recent_decisions, runtime_status):
       border-radius: 8px;
       padding: 16px;
     }}
-    .decision-title {{
-      margin: 0 0 8px;
-      font-size: 16px;
-    }}
-    .decision-summary {{
-      margin-bottom: 12px;
-      line-height: 1.55;
-    }}
     .decision-meta {{
       display: flex;
       flex-wrap: wrap;
@@ -378,7 +356,7 @@ def build_html(trades, recent_decisions, runtime_status):
       </div>
     </section>
 
-    <h2 class="section-title">예약 매매 판단 기록</h2>
+    <h2 class="section-title">최근 판단 로그</h2>
     <section class="decision-grid" id="decision-cards"></section>
     <div class="empty" id="decision-empty" hidden>아직 공개할 판단 로그가 없습니다.</div>
 
@@ -410,20 +388,6 @@ def build_html(trades, recent_decisions, runtime_status):
     const signedWon = (value) => value == null ? "-" : `${{value > 0 ? "+" : ""}}${{won.format(value)}}원`;
     const signedPct = (value) => value == null ? "-" : `${{value > 0 ? "+" : ""}}${{pct.format(value)}}%`;
     const tone = (value) => value > 0 ? "positive" : value < 0 ? "negative" : "";
-    const formatKst = (value) => {{
-      if (!value) return "시각 미상";
-      const parsed = new Date(value);
-      if (Number.isNaN(parsed.getTime())) return value;
-      return new Intl.DateTimeFormat("ko-KR", {{
-        timeZone: "Asia/Seoul",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }}).format(parsed);
-    }};
 
     document.getElementById("generated-at").textContent =
       `마지막 갱신 ${{data.summary.generated_at}}`;
@@ -501,25 +465,12 @@ def build_html(trades, recent_decisions, runtime_status):
       for (const entry of [...data.recent_decisions].reverse()) {{
         const card = document.createElement("article");
         card.className = "decision-card";
-        const title = document.createElement("h3");
-        title.className = "decision-title";
-        const decisionSource = String(entry.decision_source || "");
-        const isScheduled = decisionSource === "scheduled-legacy" || decisionSource.startsWith("gpt-");
-        title.textContent = `${{isScheduled ? "예약 매매" : "자동 매매 판단"}} · ${{formatKst(entry.recorded_at)}} KST`;
-        card.appendChild(title);
         const meta = document.createElement("div");
         meta.className = "decision-meta";
         const entryBlock = entry.entry_block_reason ? ` · entry_block=${{entry.entry_block_reason}}` : "";
         meta.textContent =
           `${{entry.recorded_at || "-"}} · risk=${{entry.risk_mode || "-"}} · cash=${{entry.cash_reserve_pct ?? "-"}}% · threshold=${{entry.buy_threshold ?? "-"}} · budget=${{entry.buy_budget_krw == null ? "-" : `${{won.format(entry.buy_budget_krw)}}원`}}${{entryBlock}}`;
         card.appendChild(meta);
-
-        if (entry.decision_summary) {{
-          const summary = document.createElement("div");
-          summary.className = "decision-summary";
-          summary.textContent = entry.decision_summary;
-          card.appendChild(summary);
-        }}
 
         const list = document.createElement("div");
         list.className = "decision-list";
@@ -541,19 +492,6 @@ def build_html(trades, recent_decisions, runtime_status):
           const item = document.createElement("div");
           item.className = "muted";
           item.textContent = `신규 진입 차단: ${{entry.entry_block_reason}}`;
-          list.appendChild(item);
-        }}
-        if (!decisions.length && !entry.entry_block_reason) {{
-          const item = document.createElement("div");
-          item.className = "decision-item";
-          const ticker = document.createElement("div");
-          ticker.textContent = "-";
-          const badge = document.createElement("div");
-          badge.className = "badge hold";
-          badge.textContent = "관망";
-          const reason = document.createElement("div");
-          reason.textContent = entry.decision_summary || "매수·매도 조건 미충족";
-          item.append(ticker, badge, reason);
           list.appendChild(item);
         }}
         if (entry.entry_rejections?.length) {{
