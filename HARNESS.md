@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-09-05 KST (runtime inspection; deployment verification recorded below)
+Last verified: 2026-09-05 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -283,6 +283,16 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
    - dashboard auto-publish succeeds on a real rebalance cycle
    - `recent_decisions` remains populated
    - host-side `git pull --ff-only origin main` still succeeds after an automatic dashboard commit
+
+## Deployment verified on 2026-09-05
+
+- Source revision: `3dd3cbe` (hard-stop monitoring and confirmed order reconciliation).
+- Both local Python and the VM container's Python passed 54 tests. VM tests used isolated temporary source copies with no live API calls or runtime-file changes.
+- Existing source/runtime files were backed up to `/home/sorryrlrud/bot-backup-20260905-pDzQkZ` before the production container was stopped, fast-forwarded and started. No image rebuild or dependency change was needed.
+- Container started at 12:48:53 KST with Docker init enabled. Source SHA-256 was `b950929bbeaf7252dae32c56438e80b1fc21f79d7a131f929eb9f27e416c6602` on both local workspace and VM.
+- The first real rebalance completed at 12:50:08 KST. Risk checks completed at 12:48:56, 12:49:56 and 12:50:56 with no failures or pending orders.
+- Bot-user SSH access to GitHub succeeded. Automatic dashboard commit `2182f32` was generated at 12:50:08 KST, and the public GitHub Pages payload showed that update with three decision snapshots.
+- Verification observed monitoring and a HOLD cycle. No new live order was needed to test execution; delayed/partial order handling was verified with mocked exchange responses.
 
 ## Security notes
 
