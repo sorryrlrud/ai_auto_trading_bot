@@ -1,7 +1,9 @@
 import json
 import logging
+import math
 import os
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timedelta
 from functools import wraps
@@ -28,6 +30,9 @@ load_dotenv()
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
+RISK_CHECK_SECONDS = max(5, int(os.getenv("RISK_CHECK_SECONDS", "60")))
+ORDER_CONFIRM_ATTEMPTS = 3
+ORDER_CONFIRM_SLEEP_SECONDS = 0.5
 API_CALL_SLEEP_SECONDS = float(os.getenv("API_CALL_SLEEP_SECONDS", "0.12"))
 UPBIT_HTTP_TIMEOUT_SECONDS = float(os.getenv("UPBIT_HTTP_TIMEOUT_SECONDS", "10"))
 MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "3"))
@@ -93,24 +98,38 @@ def safe_float(value, default=0.0):
 
 def finite_float(value, default=0.0):
     value = safe_float(value, default)
-    if pd.isna(value):
+    if not math.isfinite(value):
         return default
     return value
+
+
+def save_json_atomic(value, path):
+    """Never leave a truncated runtime file after interruption."""
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, temporary = tempfile.mkstemp(prefix=".bot-json-", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False, indent=2, allow_nan=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def load_bot_state(path=BOT_STATE_FILE):
     try:
         with open(path, "r", encoding="utf-8") as f:
             state = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
         state = {}
     state.setdefault("trades", {})
     return state
 
 
 def save_bot_state(state, path=BOT_STATE_FILE):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    save_json_atomic(state, path)
 
 
 def _sleep_api():
@@ -169,12 +188,14 @@ def append_trade_history(record, path=TRADE_HISTORY_FILE):
     try:
         with open(path, "r", encoding="utf-8") as f:
             rows = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
         rows = []
 
+    if record.get("order_uuid") and any(row.get("order_uuid") == record["order_uuid"] for row in rows):
+        return False
     rows.append(record)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(rows, f, ensure_ascii=False, indent=2)
+    save_json_atomic(rows, path)
+    return True
 
 
 def load_decision_history(path=DECISION_HISTORY_FILE):
@@ -210,8 +231,7 @@ def load_runtime_status(path=RUNTIME_STATUS_FILE):
 
 
 def save_runtime_status(status, path=RUNTIME_STATUS_FILE):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(status, f, ensure_ascii=False, indent=2)
+    save_json_atomic(status, path)
 
 
 def mark_cycle_started(path=RUNTIME_STATUS_FILE, now=None):
@@ -325,9 +345,9 @@ def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=20):
 
 def refresh_dashboard():
     try:
-        subprocess.run(["python", "generate_dashboard.py"], check=True, capture_output=True, text=True)
+        subprocess.run(["python", "generate_dashboard.py"], check=True, capture_output=True, text=True, timeout=30)
         if DASHBOARD_AUTO_PUBLISH:
-            subprocess.run(["python", "publish_dashboard.py"], check=True, capture_output=True, text=True)
+            subprocess.run(["python", "publish_dashboard.py"], check=True, capture_output=True, text=True, timeout=30)
         return True
     except subprocess.CalledProcessError as e:
         logger.error(
@@ -359,8 +379,10 @@ def build_buy_state_record(order=None):
 def build_sell_history_record(decision, order=None, entry_state=None):
     order = order if isinstance(order, dict) else {}
     entry_state = entry_state if isinstance(entry_state, dict) else {}
-    executed_volume = _sum_trade_field(order, "volume") or safe_float(decision.get("balance"))
-    gross_proceeds = _sum_trade_field(order, "funds") or executed_volume * safe_float(decision.get("current_price"))
+    executed_volume = _sum_trade_field(order, "volume")
+    gross_proceeds = _sum_trade_field(order, "funds")
+    if executed_volume <= 0 or gross_proceeds <= 0:
+        raise ValueError("Realized PnL requires confirmed fills; a holding snapshot is not a fill")
     sell_fee_krw = safe_float(order.get("paid_fee"))
     buy_fee_krw = safe_float(entry_state.get("entry_fee_krw"))
     entry_volume = safe_float(entry_state.get("entry_volume"))
@@ -375,6 +397,7 @@ def build_sell_history_record(decision, order=None, entry_state=None):
     profit_pct = (profit_krw / invested_krw * 100) if invested_krw else safe_float(decision.get("profit_pct"))
 
     return {
+        "order_uuid": order.get("uuid"),
         "executed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "side": "SELL",
         "ticker": decision["ticker"],
@@ -389,7 +412,7 @@ def build_sell_history_record(decision, order=None, entry_state=None):
         "profit_krw": round(profit_krw, 2),
         "profit_pct": round(profit_pct, 4),
         "reason": decision.get("reason", ""),
-        "source": "order_detail" if order else "holding_snapshot",
+        "source": "order_detail",
     }
 
 
@@ -575,6 +598,9 @@ def get_current_holdings(upbit):
         current_price = pyupbit.get_current_price(ticker)
         _sleep_api()
         avg_buy_price = safe_float(balance.get("avg_buy_price"))
+        if not finite_float(current_price) or current_price <= 0:
+            logger.warning("Price unavailable for held asset %s; skipping its valuation", ticker)
+            continue
         value = amount * current_price if current_price else 0
         profit_pct = ((current_price / avg_buy_price) - 1) * 100 if current_price and avg_buy_price else 0.0
 
@@ -921,22 +947,101 @@ def seconds_until_next_cycle(now_ts=None, interval_seconds=LOOP_SLEEP_SECONDS, b
     return max(next_boundary - now_ts, 1)
 
 
+def confirmed_order_detail(upbit, order_uuid):
+    """Accept terminal orders only, including a market buy with refunded dust."""
+    for attempt in range(ORDER_CONFIRM_ATTEMPTS):
+        try:
+            order = upbit.get_order(order_uuid)
+            if isinstance(order, dict) and order.get("state") in {"done", "cancel"}:
+                volume = finite_float(order.get("executed_volume"), -1)
+                filled = _sum_trade_field(order, "volume")
+                funds = _sum_trade_field(order, "funds")
+                fee = finite_float(order.get("paid_fee"), -1)
+                if volume == 0 and filled == 0 and order["state"] == "cancel":
+                    return dict(order, uuid=order_uuid)
+                if (volume > 0 and funds > 0 and math.isfinite(funds) and fee >= 0
+                        and math.isclose(filled, volume, rel_tol=1e-7, abs_tol=1e-12)):
+                    return dict(order, uuid=order_uuid)
+        except Exception as error:
+            logger.warning("Order confirmation failed for %s: %s", order_uuid, error)
+        if attempt + 1 < ORDER_CONFIRM_ATTEMPTS:
+            time.sleep(ORDER_CONFIRM_SLEEP_SECONDS)
+    return None
+
+
+def reconcile_pending_orders(upbit, state):
+    """Retry read-only confirmation after timeouts/restarts; never resubmit."""
+    history_changed = False
+    pending_orders = state.setdefault("pending_orders", {})
+    for order_uuid, pending in list(pending_orders.items()):
+        order = confirmed_order_detail(upbit, order_uuid)
+        if order is None:
+            logger.warning("[ORDER PENDING] %s %s", pending["decision"]["ticker"], order_uuid)
+            continue
+        decision = pending["decision"]
+        ticker = decision["ticker"]
+        volume = _sum_trade_field(order, "volume")
+        if volume > 0:
+            # Apply from the persisted pre-order snapshot so crash recovery is idempotent.
+            trade_state = dict(pending["entry_state"])
+            if decision["decision"] == "BUY":
+                trade_state.update(build_buy_state_record(order))
+                trade_state["last_buy_ts"] = pending["submitted_at"]
+                logger.info("[BUY CONFIRMED] %s volume=%s", ticker, volume)
+            else:
+                record = build_sell_history_record(decision, order, entry_state=trade_state)
+                append_trade_history(record)
+                history_changed = True
+                trade_state["last_sell_ts"] = pending["submitted_at"]
+                entry_volume = safe_float(trade_state.get("entry_volume"))
+                remaining_ratio = max(1 - volume / entry_volume, 0) if entry_volume else 0
+                for field in ENTRY_STATE_FIELDS:
+                    if remaining_ratio > 1e-7:
+                        trade_state[field] = safe_float(trade_state.get(field)) * remaining_ratio
+                    else:
+                        trade_state.pop(field, None)
+                logger.info("[REALIZED] %s profit=%s KRW (%s%%)", ticker, record["profit_krw"], record["profit_pct"])
+            state["trades"][ticker] = trade_state
+        else:
+            logger.warning("[ORDER CANCELED WITHOUT FILL] %s %s", ticker, order_uuid)
+        del pending_orders[order_uuid]
+        save_bot_state(state)
+    return history_changed
+
+
+def track_submitted_order(upbit, result, decision, state):
+    order_uuid = result["uuid"]
+    state.setdefault("pending_orders", {})[order_uuid] = {
+        "decision": dict(decision),
+        "entry_state": dict(state["trades"].get(decision["ticker"], {})),
+        "submitted_at": time.time(),
+    }
+    save_bot_state(state)
+    return reconcile_pending_orders(upbit, state)
+
+
 def execute_rebalance_plan(upbit, plan, state=None):
     state = state or {"trades": {}}
     state.setdefault("trades", {})
+    pending_at_start = {p["decision"]["ticker"] for p in state.get("pending_orders", {}).values()}
+    trade_history_changed = reconcile_pending_orders(upbit, state) if TRADE_ENABLED else False
     decisions = plan.get("decisions", [])
     if not decisions:
         logger.info("No decisions to execute.")
-        return False
+        return trade_history_changed
 
-    trade_history_changed = False
+    sells_completed = True
 
     for decision in decisions:
         if decision["decision"] != "SELL":
             continue
 
         ticker = decision["ticker"]
+        if ticker in pending_at_start or any(p["decision"]["ticker"] == ticker for p in state.get("pending_orders", {}).values()):
+            sells_completed = False
+            continue
         balance = upbit.get_balance(ticker.split("-")[1])
+        balance = min(finite_float(balance), safe_float(decision.get("balance")))
         current_price = pyupbit.get_current_price(ticker)
         if balance and current_price and balance * current_price >= MIN_ORDER_KRW:
             if not TRADE_ENABLED:
@@ -945,29 +1050,33 @@ def execute_rebalance_plan(upbit, plan, state=None):
             logger.info(f"[SELL] {ticker} | {decision['reason']}")
             result = upbit.sell_market_order(ticker, balance)
             if result and "uuid" in result:
-                trade_state = state["trades"].setdefault(ticker, {})
-                entry_state = dict(trade_state)
-                trade_state["last_sell_ts"] = time.time()
-                for field in ENTRY_STATE_FIELDS:
-                    trade_state.pop(field, None)
-                save_bot_state(state)
-                order = upbit.get_order(result["uuid"])
-                record = build_sell_history_record(decision, order, entry_state=entry_state)
-                append_trade_history(record)
-                trade_history_changed = True
-                logger.info(
-                    "[REALIZED] %s profit=%s KRW (%s%%)",
-                    ticker,
-                    record["profit_krw"],
-                    record["profit_pct"],
-                )
+                changed = track_submitted_order(upbit, result, dict(decision, balance=balance), state)
+                trade_history_changed = changed or trade_history_changed
+                # A rejected, pending or partial exit cannot fund its planned replacement.
+                remaining = upbit.get_balance(ticker.split("-")[1])
+                if finite_float(remaining, -1) < 0 or finite_float(remaining) > 1e-10:
+                    sells_completed = False
             else:
                 logger.error(f"[SELL FAILED] {ticker} : {result}")
+                sells_completed = False
             time.sleep(1)
+        else:
+            sells_completed = False
+
+    buy_targets = [d for d in decisions if d["decision"] == "BUY"]
+    if not buy_targets:
+        for decision in decisions:
+            if decision["decision"] == "HOLD":
+                logger.info("[HOLD] %s | %s", decision["ticker"], decision["reason"])
+        return trade_history_changed
+    if not sells_completed or pending_at_start or state.get("pending_orders"):
+        logger.warning("[BUY BLOCKED] An exit is incomplete or an order awaits confirmation")
+        return trade_history_changed
 
     krw = upbit.get_balance("KRW")
+    if krw is None or not math.isfinite(float(krw)) or krw < 0:
+        raise RuntimeError("Invalid KRW balance; refusing to allocate new entries")
     investable_krw = min(krw, plan.get("buy_budget_krw", krw * (1 - plan["cash_reserve_pct"] / 100)))
-    buy_targets = [d for d in decisions if d["decision"] == "BUY"]
 
     if buy_targets and investable_krw >= MIN_ORDER_KRW:
         amount_per_coin = (investable_krw * ORDER_BUFFER) / len(buy_targets)
@@ -981,15 +1090,10 @@ def execute_rebalance_plan(upbit, plan, state=None):
             result = upbit.buy_market_order(decision["ticker"], amount_per_coin)
             if result and "uuid" in result:
                 logger.info(f"[BUY] {decision['ticker']} {int(amount_per_coin)} KRW | {decision['reason']}")
-                trade_state = state["trades"].setdefault(decision["ticker"], {})
-                trade_state["last_buy_ts"] = time.time()
-                save_bot_state(state)
-                try:
-                    order = upbit.get_order(result["uuid"])
-                    trade_state.update(build_buy_state_record(order))
-                    save_bot_state(state)
-                except Exception as e:
-                    logger.warning("[BUY DETAIL ERROR] %s: %s", decision["ticker"], e)
+                changed = track_submitted_order(upbit, result, decision, state)
+                trade_history_changed = changed or trade_history_changed
+                if state.get("pending_orders"):
+                    break
             else:
                 logger.error(f"[BUY FAILED] {decision['ticker']} : {result}")
             time.sleep(1)
@@ -998,6 +1102,56 @@ def execute_rebalance_plan(upbit, plan, state=None):
         if decision["decision"] == "HOLD":
             logger.info(f"[HOLD] {decision['ticker']} | {decision['reason']}")
     return trade_history_changed
+
+
+class RiskMonitor:
+    """Check the existing hard stop between candle scans, without creating entries."""
+
+    def __init__(self, upbit):
+        self.upbit = upbit
+        self.next_check = 0.0
+
+    def check(self):
+        if time.monotonic() < self.next_check:
+            return
+        self.next_check = time.monotonic() + RISK_CHECK_SECONDS
+        try:
+            state = load_bot_state()
+            changed = reconcile_pending_orders(self.upbit, state) if TRADE_ENABLED else False
+            holdings = get_current_holdings(self.upbit)
+            decisions = []
+            for holding in holdings:
+                if holding["profit_pct"] <= STOP_LOSS_PCT:
+                    decisions.append(dict(holding, decision="SELL", reason=f"손실 {holding['profit_pct']}%로 손절 기준 도달 (상시 점검)"))
+            if decisions:
+                plan = {"decisions": decisions, "risk_mode": "stop_loss_monitor", "buy_budget_krw": 0}
+                append_decision_history(plan)
+                changed = execute_rebalance_plan(self.upbit, plan, state) or changed
+            status = load_runtime_status()
+            status.update({"risk_check_interval_seconds": RISK_CHECK_SECONDS,
+                           "last_risk_check_at": _iso_now(), "risk_check_failures": 0,
+                           "pending_order_count": len(state.get("pending_orders", {}))})
+            save_runtime_status(status)
+            logger.info("[RISK CHECK] holdings=%s stops=%s pending=%s", len(holdings), len(decisions), status["pending_order_count"])
+            if changed and refresh_dashboard():
+                mark_dashboard_refreshed()
+        except Exception as error:
+            status = load_runtime_status()
+            status.update({"last_risk_error_at": _iso_now(), "last_risk_error_type": type(error).__name__,
+                           "risk_check_failures": int(status.get("risk_check_failures", 0)) + 1})
+            save_runtime_status(status)
+            raise
+
+    def wait(self, seconds):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            try:
+                self.check()
+            except Exception:
+                logger.exception("Risk check failed; retrying on the next risk interval")
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(remaining, max(self.next_check - time.monotonic(), 0.1), 60))
 
 
 def main():
@@ -1010,10 +1164,13 @@ def main():
     if not upbit:
         return
 
+    risk_monitor = RiskMonitor(upbit)
+
     while True:
         try:
             logger.info("\n--- 리밸런싱 사이클 시작 ---")
             mark_cycle_started()
+            risk_monitor.check()
 
             recent_performance = load_recent_performance()
             state = load_bot_state()
@@ -1025,11 +1182,17 @@ def main():
 
             market_data = []
             for ticker in targets:
+                risk_monitor.check()
                 data = get_market_data(ticker)
                 if data:
                     market_data.append(data)
                 _sleep_api()
 
+            # Scanning 25 markets takes over a minute. Re-read both holdings and
+            # state because the risk monitor may have exited during the scan.
+            current_holdings = get_current_holdings(upbit)
+            state = load_bot_state()
+            recent_performance = load_recent_performance()
             krw_balance = upbit.get_balance("KRW")
             plan = build_rebalance_plan(
                 market_data=market_data,
@@ -1077,7 +1240,7 @@ def main():
             if RUN_ONCE:
                 logger.info("RUN_ONCE=true. Exiting after one cycle.")
                 break
-            time.sleep(sleep_seconds)
+            risk_monitor.wait(seconds_until_next_cycle())
         except Exception as e:
             logger.error(f"Main Loop Error: {e}")
             runtime_status = mark_cycle_failed(e)
@@ -1085,7 +1248,9 @@ def main():
                 logger.info("Hourly dashboard heartbeat due after error. Refreshing dashboard.")
                 if refresh_dashboard():
                     mark_dashboard_refreshed()
-            time.sleep(300)
+            if RUN_ONCE:
+                raise
+            risk_monitor.wait(300)
 
 
 if __name__ == "__main__":

@@ -36,8 +36,12 @@ The entrypoint prepares SSH as root, creates a lightweight bot user for `BOT_UID
 
 The rule engine keeps at least the market- and performance-dependent cash reserve and caps each new position at `MAX_SINGLE_POSITION_PCT` of total portfolio value (default `25%`). This prevents a single eligible candidate from consuming the entire investable balance when `MAX_POSITIONS` is greater than one.
 
+The existing hard stop (`STOP_LOSS_PCT`, default `-2.2%` before fees) is checked every `RISK_CHECK_SECONDS` (default `60`) between rebalance cycles and during market scans. Entry and indicator-based exit decisions still follow the 15-minute cycle. Checks run in the same process, so API calls and dashboard publishing can delay them; a market stop does not guarantee the threshold price. Dashboard subprocesses have bounded timeouts. Holdings are refreshed after each market scan before the rebalance plan is built.
+
+Accepted orders are saved under `pending_orders` in `bot_state.json` and checked for terminal `done` or `cancel` status with matching execution details. Pending orders are reconciled after restart and prevent replacement buys. Realized PnL uses actual fills only, retains the remaining buy fee after a partial sell, and deduplicates history by order UUID. State and trade history writes are atomic. A submission that fails before returning an order UUID still requires checking the exchange; the pending-order recovery covers acknowledged orders.
+
 ## Local test
 
 ```bash
-docker compose run --rm coin-bot python -m unittest test_logic.py
+./venv/bin/python -m unittest test_logic.py test_execution.py
 ```

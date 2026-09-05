@@ -236,6 +236,8 @@ class TestTradingLogic(unittest.TestCase):
             def get_order(self, order_id):
                 self.order_id = order_id
                 return {
+                    "state": "cancel",
+                    "executed_volume": "5",
                     "paid_fee": "4.98",
                     "trades": [{"volume": "5", "funds": "9950"}],
                 }
@@ -269,6 +271,8 @@ class TestTradingLogic(unittest.TestCase):
 
             def get_order(self, order_id):
                 return {
+                    "state": "done",
+                    "executed_volume": "5",
                     "paid_fee": "2.75",
                     "trades": [{"volume": "5", "funds": "5500"}],
                 }
