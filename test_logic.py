@@ -590,6 +590,35 @@ class TestTradingLogic(unittest.TestCase):
         self.assertFalse({"KRW-USDT", "KRW-USDC", "KRW-USD1"} & set(result))
         self.assertEqual(len(result), 5)
 
+    def test_top_volume_targets_skips_unavailable_market_without_losing_valid_rows(self):
+        markets = ["KRW-A", "KRW-GONE", "KRW-B", "KRW-C"]
+
+        class FakeResponse:
+            def __init__(self, requested):
+                self.requested = requested
+                self.status_code = 404 if "KRW-GONE" in requested else 200
+
+            def raise_for_status(self):
+                if self.status_code == 404:
+                    raise autotrade.requests.HTTPError(response=self)
+
+            def json(self):
+                return [
+                    {"market": ticker, "acc_trade_price_24h": index}
+                    for index, ticker in enumerate(self.requested, start=1)
+                ]
+
+        def fake_get(_url, params, timeout):
+            return FakeResponse(params["markets"].split(","))
+
+        with mock.patch.object(autotrade.pyupbit, "get_tickers", return_value=markets), mock.patch.object(
+            autotrade.requests, "get", side_effect=fake_get
+        ), mock.patch.object(autotrade, "_sleep_api"), self.assertLogs(autotrade.logger, level="WARNING") as logs:
+            result = autotrade.get_top_volume_targets(limit=5)
+
+        self.assertEqual(set(result), {"KRW-A", "KRW-B", "KRW-C"})
+        self.assertTrue(any("KRW-GONE" in message for message in logs.output))
+
     def test_defensive_mode_blocks_new_buys(self):
         plan = autotrade.build_rebalance_plan(
             market_data=[sample_market_row("KRW-STRONG")],

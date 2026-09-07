@@ -623,14 +623,36 @@ def _chunks(items, size):
         yield items[start : start + size]
 
 
+def _get_ticker_rows(markets):
+    if not markets:
+        return []
+
+    response = requests.get(
+        "https://api.upbit.com/v1/ticker",
+        params={"markets": ",".join(markets)},
+        timeout=10,
+    )
+    _sleep_api()
+    try:
+        response.raise_for_status()
+        return response.json()
+    except requests.HTTPError as exc:
+        status_code = getattr(exc.response, "status_code", None)
+        if status_code != 404:
+            raise
+        if len(markets) == 1:
+            logger.warning("Skipping unavailable Upbit market from ticker scan: %s", markets[0])
+            return []
+
+        midpoint = len(markets) // 2
+        return _get_ticker_rows(markets[:midpoint]) + _get_ticker_rows(markets[midpoint:])
+
+
 def get_top_volume_targets(limit=25):
     all_krw = pyupbit.get_tickers(fiat="KRW")
     rows = []
     for chunk in _chunks(all_krw, 100):
-        response = requests.get("https://api.upbit.com/v1/ticker", params={"markets": ",".join(chunk)}, timeout=10)
-        response.raise_for_status()
-        rows.extend(response.json())
-        _sleep_api()
+        rows.extend(_get_ticker_rows(chunk))
 
     eligible = [row for row in rows if row["market"] not in EXCLUDED_ENTRY_TICKERS]
     return [row["market"] for row in sorted(eligible, key=lambda x: x["acc_trade_price_24h"], reverse=True)[:limit]]
