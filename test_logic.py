@@ -135,6 +135,22 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(perf["avg_profit"], 0.5)
         self.assertEqual(perf["net_profit"], 1.0)
 
+    def test_recent_performance_tracks_latest_realized_loss_time(self):
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            json.dump(
+                [
+                    {"side": "SELL", "profit_pct": -1.0, "executed_at": "2026-09-08T06:00:00+09:00"},
+                    {"side": "SELL", "profit_pct": 2.0, "executed_at": "2026-09-08T07:00:00+09:00"},
+                    {"side": "SELL", "profit_pct": -0.5, "executed_at": "2026-09-08T08:00:00+09:00"},
+                ],
+                f,
+            )
+            f.flush()
+            perf = autotrade.load_recent_performance(path=f.name, limit=10)
+
+        expected = datetime.fromisoformat("2026-09-08T08:00:00+09:00").timestamp()
+        self.assertEqual(perf["last_loss_ts"], expected)
+
     def test_dashboard_ignores_ambiguous_legacy_trade_rows(self):
         with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
             json.dump(
@@ -548,6 +564,45 @@ class TestTradingLogic(unittest.TestCase):
             now_ts=now_ts,
         )
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+    def test_recent_realized_loss_blocks_cross_ticker_buy_for_two_hours(self):
+        now_ts = 10_000
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-STRONG")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={
+                "count": 5,
+                "avg_profit": -0.1,
+                "loss_rate": 0.6,
+                "net_profit": -0.5,
+                "last_loss_ts": now_ts - 60,
+            },
+            now_ts=now_ts,
+        )
+
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+        self.assertEqual(plan["entry_block_reason"], "최근 실현 손실 후 2시간 신규 매수 휴지기")
+
+    def test_cross_ticker_buy_resumes_after_loss_cooldown(self):
+        now_ts = 10_000
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-STRONG")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={
+                "count": 5,
+                "avg_profit": -0.1,
+                "loss_rate": 0.6,
+                "net_profit": -0.5,
+                "last_loss_ts": now_ts - autotrade.LOSS_COOLDOWN_SECONDS,
+            },
+            now_ts=now_ts,
+        )
+
+        self.assertTrue([d for d in plan["decisions"] if d["decision"] == "BUY"])
 
     def test_excluded_entry_ticker_is_not_bought(self):
         plan = autotrade.build_rebalance_plan(

@@ -43,6 +43,7 @@ PROFIT_PROTECT_PCT = float(os.getenv("PROFIT_PROTECT_PCT", "1.2"))
 BASE_BUY_SCORE = float(os.getenv("BASE_BUY_SCORE", "10.0"))
 MIN_HOLD_SECONDS = int(os.getenv("MIN_HOLD_SECONDS", "3600"))
 TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
+LOSS_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_COOLDOWN_SECONDS", "7200")))
 CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20"))
 MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "12.0"))
 ALLOW_DEFENSIVE_BUYS = os.getenv("ALLOW_DEFENSIVE_BUYS", "false").lower() == "true"
@@ -175,12 +176,22 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
     recent = realized_rows[-limit:]
     profits = [safe_float(row.get("profit_pct", row.get("profit"))) for row in recent]
     losses = [p for p in profits if p < 0]
+    last_loss_ts = 0.0
+    for row, profit in zip(recent, profits):
+        if profit >= 0 or not row.get("executed_at"):
+            continue
+        try:
+            executed_at = datetime.fromisoformat(str(row["executed_at"]).replace("Z", "+00:00"))
+            last_loss_ts = max(last_loss_ts, executed_at.timestamp())
+        except (TypeError, ValueError):
+            continue
 
     return {
         "count": len(profits),
         "avg_profit": round(sum(profits) / len(profits), 3) if profits else 0.0,
         "loss_rate": round(len(losses) / len(profits), 3) if profits else 0.0,
         "net_profit": round(sum(profits), 3),
+        "last_loss_ts": last_loss_ts,
     }
 
 
@@ -834,6 +845,15 @@ def is_buy_cooldown(ticker, state, now_ts):
     return last_exit_ts and now_ts - last_exit_ts < TRADE_COOLDOWN_SECONDS
 
 
+def is_loss_cooldown(recent_performance, now_ts):
+    last_loss_ts = safe_float(recent_performance.get("last_loss_ts"))
+    return bool(
+        LOSS_COOLDOWN_SECONDS
+        and last_loss_ts
+        and now_ts - last_loss_ts < LOSS_COOLDOWN_SECONDS
+    )
+
+
 def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
     ticker = holding["ticker"]
     profit_pct = holding["profit_pct"]
@@ -884,6 +904,13 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
     entry_gate = None
     if market_context.get("risk_mode") == "defensive" and not ALLOW_DEFENSIVE_BUYS:
         entry_gate = "BTC 방어장세에서는 신규 매수 차단"
+    elif is_loss_cooldown(recent_performance, now_ts):
+        cooldown_minutes = max(math.ceil(LOSS_COOLDOWN_SECONDS / 60), 1)
+        if cooldown_minutes % 60 == 0:
+            cooldown_duration = f"{cooldown_minutes // 60}시간"
+        else:
+            cooldown_duration = f"{cooldown_minutes}분"
+        entry_gate = f"최근 실현 손실 후 {cooldown_duration} 신규 매수 휴지기"
 
     for holding in current_holdings:
         sell, reason = should_sell_holding(holding, data_by_ticker, market_context, state, now_ts)
