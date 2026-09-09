@@ -230,6 +230,7 @@ Do not force-push over dashboard commits unless there is a deliberate reason.
 - With the current default `ALLOW_DEFENSIVE_BUYS=false`, `risk_mode=defensive` blocks all new entries while still managing existing holdings.
 - Candidate entries are hard-blocked when the long-term trend is not aligned, the 1-hour or 15-minute trend is not aligned, the market is overheated, the move is too extended, or `atr_pct` exceeds `MAX_ENTRY_ATR_PCT` (default `12.0`).
 - A realized losing sell pauses all new entries across tickers for `LOSS_COOLDOWN_SECONDS` (default 2 hours), while existing holding management and exits continue. This complements the per-ticker 6-hour trade cooldown and reduces cross-ticker churn after a stop-out.
+- The loss cooldown is checked again after sells complete, before replacement buys execute, so a newly realized loss also blocks a buy that was already present in the same rebalance plan.
 - A new position is capped at `MAX_SINGLE_POSITION_PCT` of total portfolio value (default `25%`), even when only one candidate passes and more portfolio slots are available.
 - Stablecoin-like entry candidates are excluded by default through `EXCLUDED_ENTRY_TICKERS=KRW-USDT,KRW-USDC,KRW-USD1`.
 - The top-volume target scan batches the full KRW market list instead of checking only an initial slice of tickers.

@@ -1121,6 +1121,9 @@ def execute_rebalance_plan(upbit, plan, state=None):
     if not sells_completed or pending_at_start or state.get("pending_orders"):
         logger.warning("[BUY BLOCKED] An exit is incomplete or an order awaits confirmation")
         return trade_history_changed
+    if TRADE_ENABLED and is_loss_cooldown(load_recent_performance(), time.time()):
+        logger.warning("[BUY BLOCKED] A realized loss started the cross-ticker cooldown")
+        return trade_history_changed
 
     krw = upbit.get_balance("KRW")
     if krw is None or not math.isfinite(float(krw)) or krw < 0:

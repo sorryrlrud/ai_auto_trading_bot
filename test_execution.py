@@ -146,6 +146,18 @@ class TestExecution(unittest.TestCase):
         bot.execute_rebalance_plan(self.upbit, self.plan(with_buy=True), self.state)
         self.upbit.buy_market_order.assert_called_once_with("KRW-BTC", 9950)
 
+    def test_realized_loss_blocks_same_plan_replacement_buy(self):
+        self.upbit.get_balance.side_effect = [5, 0]
+        self.upbit.get_order.return_value = fill(funds=4800, fee=2.4)
+
+        with self.assertLogs(bot.logger, level="WARNING") as logs:
+            bot.execute_rebalance_plan(self.upbit, self.plan(with_buy=True), self.state)
+
+        self.upbit.buy_market_order.assert_not_called()
+        record = json.loads(Path(bot.TRADE_HISTORY_FILE).read_text())[0]
+        self.assertLess(record["profit_krw"], 0)
+        self.assertTrue(any("realized loss" in message for message in logs.output))
+
     def test_no_fill_buy_does_not_start_holding_timer(self):
         self.state = {"trades": {}}
         self.upbit.get_order.return_value = fill(0, 0, state="cancel", fee=0)

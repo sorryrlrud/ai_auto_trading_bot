@@ -40,6 +40,8 @@ After any realized losing sell, the bot pauses all new entries for `LOSS_COOLDOW
 
 The existing hard stop (`STOP_LOSS_PCT`, default `-2.2%` before fees) is checked every `RISK_CHECK_SECONDS` (default `60`) between rebalance cycles and during market scans. Entry and indicator-based exit decisions still follow the 15-minute cycle. Checks run in the same process, so API calls and dashboard publishing can delay them; a market stop does not guarantee the threshold price. Dashboard subprocesses have bounded timeouts. Holdings are refreshed after each market scan before the rebalance plan is built.
 
+When a sell realizes a loss, the global entry cooldown is re-checked before any replacement buy from the same rebalance plan. This prevents an immediate cross-ticker rotation from bypassing `LOSS_COOLDOWN_SECONDS`.
+
 Accepted orders are saved under `pending_orders` in `bot_state.json` and checked for terminal `done` or `cancel` status with matching execution details. Pending orders are reconciled after restart and prevent replacement buys. Realized PnL uses actual fills only, retains the remaining buy fee after a partial sell, and deduplicates history by order UUID. State and trade history writes are atomic. A submission that fails before returning an order UUID still requires checking the exchange; the pending-order recovery covers acknowledged orders.
 
 ## Local test
