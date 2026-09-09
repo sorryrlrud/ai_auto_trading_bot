@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-09-05 KST
+Last verified: 2026-09-09 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -59,9 +59,11 @@ docker exec quant-ai-bot date
   - `runtime_status.json`
   - `bot_state.json`
   - `trading.log`
+  - `strategy_observations.jsonl` and up to three rotated backups
   - `docs/index.html`
 
 `decision_history.json`, `trade_history.json`, `runtime_status.json`, `bot_state.json`, and `trading.log` are runtime data files and should not be committed.
+`strategy_observations.jsonl*` also contains private runtime data (including account snapshots), is ignored by Git, and must not be published. It rotates at 10 MiB per file with three backups. Use a VM copy for offline diagnostics with `review_strategy.py`; never substitute local runtime files for production performance.
 
 ## Current dashboard behavior
 
@@ -229,6 +231,9 @@ Do not force-push over dashboard commits unless there is a deliberate reason.
 - Entry indicators are calculated from completed candles only; the latest in-progress daily, 1-hour, and 15-minute candles are excluded before RSI/MACD/MA calculations.
 - With the current default `ALLOW_DEFENSIVE_BUYS=false`, `risk_mode=defensive` blocks all new entries while still managing existing holdings.
 - Candidate entries are hard-blocked when the long-term trend is not aligned, the 1-hour or 15-minute trend is not aligned, the market is overheated, the move is too extended, or `atr_pct` exceeds `MAX_ENTRY_ATR_PCT` (default `12.0`).
+- Candidates with completed-candle one-hour returns below `MIN_ENTRY_CHANGE_1H_PCT` (default `-1.0%`) are now blocked even if their total score passes. This only affects entries. The September 9 historical selection diagnostic did not establish an incremental net-profit gain over the fixed two-hour cooldown; see `STRATEGY_REVIEW_2026-09-09.md` before claiming a performance improvement.
+- Entry order UUIDs and their indicator context persist through pending-order recovery and partial exits, and are attached to realized history. They are cleared from active state after a full exit. Malformed trade-history JSON now blocks new entries instead of silently clearing loss controls.
+- Full scan inputs and plans are captured privately after each completed cycle, including observed times and completed-candle start times. A diagnostic write failure does not block trade handling. The public decision payload includes the strategy version but excludes entry context.
 - A realized losing sell pauses all new entries across tickers for `LOSS_COOLDOWN_SECONDS` (default 2 hours), while existing holding management and exits continue. This complements the per-ticker 6-hour trade cooldown and reduces cross-ticker churn after a stop-out.
 - The loss cooldown is checked again after sells complete, before replacement buys execute, so a newly realized loss also blocks a buy that was already present in the same rebalance plan.
 - A new position is capped at `MAX_SINGLE_POSITION_PCT` of total portfolio value (default `25%`), even when only one candidate passes and more portfolio slots are available.
@@ -274,7 +279,7 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 4. Make source changes locally and run tests with the project venv:
 
 ```bash
-./venv/bin/python -m unittest test_logic.py test_execution.py
+./venv/bin/python -m unittest test_logic.py test_execution.py test_strategy_review.py
 ```
 
 5. Rebase onto `origin/main` before pushing because dashboard commits may have landed.
@@ -295,6 +300,16 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - The first real rebalance completed at 12:50:08 KST. Risk checks completed at 12:48:56, 12:49:56 and 12:50:56 with no failures or pending orders.
 - Bot-user SSH access to GitHub succeeded. Automatic dashboard commit `2182f32` was generated at 12:50:08 KST, and the public GitHub Pages payload showed that update with three decision snapshots.
 - Verification observed monitoring and a HOLD cycle. No new live order was needed to test execution; delayed/partial order handling was verified with mocked exchange responses.
+
+## Deployment verified on 2026-09-09
+
+- Source revision: `24c297b` (`2026-09-09-momentum-audit`). Local and isolated VM tests each passed 74 tests; VM tests blocked socket connections and used temporary source/runtime directories.
+- Backup: `/home/sorryrlrud/bot-backup-20260909-dk9c47hc`. No dependency or image rebuild was needed. Existing runtime history was preserved.
+- Container started at 11:58:28 KST. Local/VM `autotrade.py` SHA-256: `a0d5850446756e6fed3be56bcbfd14d521c240501b66ea08b6e96040dde5c5ad`.
+- First cycle completed at 11:59:49 KST. Risk checks at 11:58:32, 11:59:33 and 12:00:35 had zero failures and zero pending orders.
+- The first private observation included 24 valid candidate inputs, completed-candle timestamps and the new strategy version. The journal was confirmed Git-ignored.
+- Automatic dashboard commit `b9f06f5` and public HTTP 200 payload both showed the 11:59:49 update, three recent decisions and the new version. Entry context was absent from the public payload. Bot-user GitHub SSH access worked.
+- The bot was defensive with no order decisions during verification. No verification trade was submitted. Profit improvement from the new entry filter remains unproven; see `STRATEGY_REVIEW_2026-09-09.md` for actual PnL, rejected alternatives and the counterfactual selection limits.
 
 ## Security notes
 
