@@ -165,6 +165,52 @@ class TestExecution(unittest.TestCase):
                                   "reason": "test"}], "buy_budget_krw": 10000, "cash_reserve_pct": 25}, self.state)
         self.assertNotIn("KRW-BTC", self.state["trades"])
 
+    def test_entry_context_survives_pending_buy_and_is_attached_to_realized_exit(self):
+        self.state = {"trades": {}}
+        context = {"strategy_version": bot.STRATEGY_VERSION, "signal": {"price_change_1h": 1.2}}
+        buy = {"decisions": [{"ticker": "KRW-ETH", "decision": "BUY", "reason": "signal"}],
+               "buy_budget_krw": 10000, "cash_reserve_pct": 25,
+               "entry_contexts": {"KRW-ETH": context}}
+        self.upbit.get_order.return_value = fill(state="wait")
+        bot.execute_rebalance_plan(self.upbit, buy, self.state)
+        reloaded = bot.load_bot_state()
+        self.assertEqual(reloaded["pending_orders"]["buy-1"]["decision"]["entry_context"], context)
+        self.upbit.get_order.return_value = fill(funds=5000, fee=2.5)
+        bot.reconcile_pending_orders(self.upbit, reloaded)
+        self.assertEqual(reloaded["trades"]["KRW-ETH"]["entry_order_uuid"], "buy-1")
+        self.assertEqual(reloaded["trades"]["KRW-ETH"]["entry_context"], context)
+        self.upbit.get_order.return_value = fill()
+        bot.execute_rebalance_plan(self.upbit, self.plan(), reloaded)
+        record = json.loads(Path(bot.TRADE_HISTORY_FILE).read_text())[0]
+        self.assertEqual(record["entry_context"], context)
+        self.assertEqual(record["entry_order_uuid"], "buy-1")
+        self.assertEqual(record["exit_price_change_pct"], 0)
+        self.assertNotIn("entry_context", reloaded["trades"]["KRW-ETH"])
+
+    def test_partial_exit_preserves_entry_context_until_position_is_closed(self):
+        context = {"strategy_version": "prior-version"}
+        self.state["trades"]["KRW-ETH"].update(entry_context=context, entry_order_uuid="entry-1")
+        self.pending()
+        self.upbit.get_order.return_value = fill(2, 2200, state="cancel", fee=1.1)
+        bot.reconcile_pending_orders(self.upbit, self.state)
+        self.assertEqual(self.state["trades"]["KRW-ETH"]["entry_context"], context)
+        record = json.loads(Path(bot.TRADE_HISTORY_FILE).read_text())[0]
+        self.assertEqual(record["entry_order_uuid"], "entry-1")
+
+    def test_new_buy_clears_stale_entry_context(self):
+        self.state["trades"]["KRW-ETH"]["entry_context"] = {"stale": True}
+        self.pending({"ticker": "KRW-ETH", "decision": "BUY"})
+        bot.reconcile_pending_orders(self.upbit, self.state)
+        self.assertNotIn("entry_context", self.state["trades"]["KRW-ETH"])
+
+    def test_corrupt_history_blocks_buy_in_execution_too(self):
+        Path(bot.TRADE_HISTORY_FILE).write_text('{"broken":')
+        plan = {"decisions": [{"ticker": "KRW-BTC", "decision": "BUY", "reason": "test"}],
+                "buy_budget_krw": 10000, "cash_reserve_pct": 25}
+        with self.assertRaises(json.JSONDecodeError):
+            bot.execute_rebalance_plan(self.upbit, plan, self.state)
+        self.upbit.buy_market_order.assert_not_called()
+
     def test_corrupt_state_and_history_are_not_silently_erased(self):
         for path in [bot.BOT_STATE_FILE, bot.TRADE_HISTORY_FILE]:
             with open(path, "w") as f:

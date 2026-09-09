@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+STRATEGY_VERSION = "2026-09-09-momentum-audit"
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
@@ -46,6 +47,7 @@ TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
 LOSS_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_COOLDOWN_SECONDS", "7200")))
 CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20"))
 MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "12.0"))
+MIN_ENTRY_CHANGE_1H_PCT = float(os.getenv("MIN_ENTRY_CHANGE_1H_PCT", "-1.0"))
 ALLOW_DEFENSIVE_BUYS = os.getenv("ALLOW_DEFENSIVE_BUYS", "false").lower() == "true"
 EXCLUDED_ENTRY_TICKERS = {
     ticker.strip()
@@ -61,7 +63,11 @@ TRADE_HISTORY_FILE = "trade_history.json"
 DECISION_HISTORY_FILE = "decision_history.json"
 BOT_STATE_FILE = "bot_state.json"
 RUNTIME_STATUS_FILE = "runtime_status.json"
+STRATEGY_OBSERVATIONS_FILE = "strategy_observations.jsonl"
+OBSERVATION_MAX_BYTES = 10 * 1024 * 1024
+OBSERVATION_BACKUP_COUNT = 3
 ENTRY_STATE_FIELDS = ("entry_volume", "entry_funds_krw", "entry_fee_krw")
+ENTRY_CONTEXT_FIELDS = ("entry_order_uuid", "entry_context")
 
 _ORIGINAL_REQUESTS_METHODS = {name: getattr(requests, name) for name in ("get", "post", "delete")}
 
@@ -159,6 +165,7 @@ def setup_api():
 
     upbit = pyupbit.Upbit(access, secret)
     logger.info("Running rule-based mode. No LLM or Google API is used.")
+    logger.info("Strategy version=%s min_entry_change_1h_pct=%s", STRATEGY_VERSION, MIN_ENTRY_CHANGE_1H_PCT)
     return upbit
 
 
@@ -166,8 +173,10 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
     try:
         with open(path, "r", encoding="utf-8") as f:
             rows = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
         rows = []
+    if not isinstance(rows, list):
+        raise ValueError("Trade history must be a list; refusing to reset loss controls")
 
     # Ignore ambiguous legacy rows that predate explicit order-side tracking.
     # Without an explicit SELL marker, a row is not safe to use as realized
@@ -317,6 +326,7 @@ def mark_dashboard_refreshed(path=RUNTIME_STATUS_FILE, now=None):
 
 def _decision_snapshot_payload(plan):
     return {
+        "strategy_version": plan.get("strategy_version"),
         "risk_mode": plan.get("risk_mode", "unknown"),
         "cash_reserve_pct": plan.get("cash_reserve_pct"),
         "max_single_position_pct": plan.get("max_single_position_pct"),
@@ -330,6 +340,7 @@ def _decision_snapshot_payload(plan):
 
 def _decision_snapshot_signature(row):
     return {
+        "strategy_version": row.get("strategy_version"),
         "risk_mode": row.get("risk_mode", "unknown"),
         "cash_reserve_pct": row.get("cash_reserve_pct"),
         "max_single_position_pct": row.get("max_single_position_pct"),
@@ -352,6 +363,41 @@ def append_decision_history(plan, path=DECISION_HISTORY_FILE, keep=20):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=2)
     return True
+
+
+def append_strategy_observation(plan, market_data, market_context, holdings, recent_performance,
+                                path=STRATEGY_OBSERVATIONS_FILE):
+    """Private, bounded journal of inputs; never used as an execution/state source."""
+    record = {
+        "schema_version": 1,
+        "recorded_at": _iso_now(),
+        "planned_at": plan.get("planned_at"),
+        "strategy_version": STRATEGY_VERSION,
+        "market_context": market_context,
+        "market_data": market_data,
+        "holdings": holdings,
+        "krw": plan.get("krw"),
+        "recent_performance": recent_performance,
+        "plan": _decision_snapshot_payload(plan),
+        "entry_rules": {"min_change_1h_pct": MIN_ENTRY_CHANGE_1H_PCT,
+                        "max_atr_pct": MAX_ENTRY_ATR_PCT,
+                        "loss_cooldown_seconds": LOSS_COOLDOWN_SECONDS},
+    }
+    try:
+        # Serialize before rotating, so invalid input cannot displace a good file.
+        line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
+        if os.path.exists(path) and os.path.getsize(path) + len(line.encode("utf-8")) > OBSERVATION_MAX_BYTES:
+            for index in range(OBSERVATION_BACKUP_COUNT, 0, -1):
+                source = str(path) if index == 1 else f"{path}.{index - 1}"
+                if os.path.exists(source):
+                    os.replace(source, f"{path}.{index}")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line)
+        return True
+    except Exception:
+        # A diagnostic write must not delay a stop or confirmed-order recovery.
+        logger.exception("Strategy observation write failed")
+        return False
 
 
 def refresh_dashboard():
@@ -407,7 +453,7 @@ def build_sell_history_record(decision, order=None, entry_state=None):
     invested_krw = cost_basis + buy_fee_krw
     profit_pct = (profit_krw / invested_krw * 100) if invested_krw else safe_float(decision.get("profit_pct"))
 
-    return {
+    record = {
         "order_uuid": order.get("uuid"),
         "executed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "side": "SELL",
@@ -424,7 +470,18 @@ def build_sell_history_record(decision, order=None, entry_state=None):
         "profit_pct": round(profit_pct, 4),
         "reason": decision.get("reason", ""),
         "source": "order_detail",
+        "exit_strategy_version": STRATEGY_VERSION,
+        "decision_profit_pct": finite_float(decision.get("profit_pct")),
     }
+    observed_price = finite_float(decision.get("current_price"))
+    if observed_price > 0:
+        record["exit_price_change_pct"] = round((avg_sell_price / observed_price - 1) * 100, 6)
+    for field in ENTRY_CONTEXT_FIELDS:
+        if field in entry_state:
+            record[field] = entry_state[field]
+    if entry_state.get("last_buy_ts"):
+        record["entry_submitted_at"] = _iso_now(datetime.fromtimestamp(entry_state["last_buy_ts"]))
+    return record
 
 
 def get_market_context():
@@ -563,6 +620,12 @@ def get_market_data(ticker):
 
         return {
             "coin": ticker,
+            "observed_at": _iso_now(),
+            "completed_candle_started_at": {
+                period: (pd.Timestamp(frame.index[-1]).tz_localize("Asia/Seoul")
+                         if frame.index.tz is None else pd.Timestamp(frame.index[-1])).isoformat()
+                for period, frame in (("daily", df), ("1h", df_1h), ("15m", df_15m))
+            },
             "p": current_price,
             "volume_ratio": round(volume_ratio, 2),
             "price_change_1d": round(price_change_1d, 2),
@@ -711,6 +774,8 @@ def entry_block_reason(data, market_context):
         return "BTC 방어장세에서는 신규 매수 차단"
     if data["atr_pct"] > MAX_ENTRY_ATR_PCT:
         return f"ATR {data['atr_pct']}% > {MAX_ENTRY_ATR_PCT}%"
+    if data["price_change_1h"] < MIN_ENTRY_CHANGE_1H_PCT:
+        return f"1시간 하락 모멘텀({data['price_change_1h']}% < {MIN_ENTRY_CHANGE_1H_PCT}%)"
     if not daily["ma20_over_60"]:
         return "일봉 장기 추세 미정렬(MA20<=MA60)"
     if not daily["price_over_ma20"]:
@@ -978,6 +1043,8 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
     entry_rejections = entry_rejections[:MAX_RECORDED_ENTRY_REJECTIONS]
 
     return {
+        "strategy_version": STRATEGY_VERSION,
+        "planned_at": _iso_now(datetime.fromtimestamp(now_ts)),
         "decisions": decisions,
         "cash_reserve_pct": reserve_pct,
         "max_single_position_pct": MAX_SINGLE_POSITION_PCT,
@@ -987,6 +1054,18 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
         "entry_rejections": entry_rejections,
         "risk_mode": market_context.get("risk_mode", "unknown"),
         "krw": krw,
+        # Keep full entry inputs out of public decision snapshots and logs.
+        "entry_contexts": {
+            candidate["ticker"]: {
+                "strategy_version": STRATEGY_VERSION,
+                "market_context": dict(market_context),
+                "signal": data_by_ticker[candidate["ticker"]],
+                "score": candidate["score"],
+                "buy_threshold": threshold,
+                "min_entry_change_1h_pct": MIN_ENTRY_CHANGE_1H_PCT,
+            }
+            for candidate in selected_candidates
+        },
     }
 
 
@@ -1036,6 +1115,11 @@ def reconcile_pending_orders(upbit, state):
             if decision["decision"] == "BUY":
                 trade_state.update(build_buy_state_record(order))
                 trade_state["last_buy_ts"] = pending["submitted_at"]
+                trade_state["entry_order_uuid"] = order_uuid
+                # A new entry must never inherit the previous position's signal.
+                trade_state.pop("entry_context", None)
+                if decision.get("entry_context"):
+                    trade_state["entry_context"] = decision["entry_context"]
                 logger.info("[BUY CONFIRMED] %s volume=%s", ticker, volume)
             else:
                 record = build_sell_history_record(decision, order, entry_state=trade_state)
@@ -1048,6 +1132,9 @@ def reconcile_pending_orders(upbit, state):
                     if remaining_ratio > 1e-7:
                         trade_state[field] = safe_float(trade_state.get(field)) * remaining_ratio
                     else:
+                        trade_state.pop(field, None)
+                if remaining_ratio <= 1e-7:
+                    for field in ENTRY_CONTEXT_FIELDS:
                         trade_state.pop(field, None)
                 logger.info("[REALIZED] %s profit=%s KRW (%s%%)", ticker, record["profit_krw"], record["profit_pct"])
             state["trades"][ticker] = trade_state
@@ -1142,7 +1229,11 @@ def execute_rebalance_plan(upbit, plan, state=None):
             result = upbit.buy_market_order(decision["ticker"], amount_per_coin)
             if result and "uuid" in result:
                 logger.info(f"[BUY] {decision['ticker']} {int(amount_per_coin)} KRW | {decision['reason']}")
-                changed = track_submitted_order(upbit, result, decision, state)
+                confirmed_decision = dict(decision)
+                context = plan.get("entry_contexts", {}).get(decision["ticker"])
+                if context:
+                    confirmed_decision["entry_context"] = context
+                changed = track_submitted_order(upbit, result, confirmed_decision, state)
                 trade_history_changed = changed or trade_history_changed
                 if state.get("pending_orders"):
                     break
@@ -1176,7 +1267,8 @@ class RiskMonitor:
                 if holding["profit_pct"] <= STOP_LOSS_PCT:
                     decisions.append(dict(holding, decision="SELL", reason=f"손실 {holding['profit_pct']}%로 손절 기준 도달 (상시 점검)"))
             if decisions:
-                plan = {"decisions": decisions, "risk_mode": "stop_loss_monitor", "buy_budget_krw": 0}
+                plan = {"decisions": decisions, "risk_mode": "stop_loss_monitor", "buy_budget_krw": 0,
+                        "strategy_version": STRATEGY_VERSION}
                 append_decision_history(plan)
                 changed = execute_rebalance_plan(self.upbit, plan, state) or changed
             status = load_runtime_status()
@@ -1268,6 +1360,7 @@ def main():
                 logger.info("Entry rejections: %s", json.dumps(plan["entry_rejections"], ensure_ascii=False))
             decision_history_changed = append_decision_history(plan)
             trade_history_changed = execute_rebalance_plan(upbit, plan, state)
+            append_strategy_observation(plan, market_data, market_context, current_holdings, recent_performance)
 
             sleep_seconds = seconds_until_next_cycle()
             next_expected_cycle_at = datetime.fromtimestamp(time.time() + sleep_seconds).astimezone().isoformat(

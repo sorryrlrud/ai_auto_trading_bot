@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest import mock
 
 import pandas as pd
@@ -723,6 +724,88 @@ class TestTradingLogic(unittest.TestCase):
         df = pd.DataFrame({"close": [1, 2, 3, 4]})
         completed = autotrade._completed_candles(df, min_rows=3)
         self.assertEqual(completed["close"].tolist(), [1, 2, 3])
+
+    def test_high_score_cannot_override_negative_hour_momentum(self):
+        row = sample_market_row("KRW-WEAK-HOUR", price_change_1h=-1.1)
+        context = {"risk_mode": "normal", "market_volatility": "normal"}
+        score, _ = autotrade.score_coin(row, context)
+        self.assertGreater(score, autotrade.BASE_BUY_SCORE)
+        plan = autotrade.build_rebalance_plan(
+            [row], context, 100000, [],
+            {"count": 0, "avg_profit": 0, "loss_rate": 0}, now_ts=10000,
+        )
+        self.assertEqual(plan["buy_budget_krw"], 0)
+        self.assertFalse(plan["entry_contexts"])
+        self.assertIn("1시간 하락 모멘텀", plan["entry_rejections"][0]["reason"])
+
+    def test_momentum_gate_boundary_and_hold_management(self):
+        with mock.patch.object(autotrade, "MIN_ENTRY_CHANGE_1H_PCT", -1.0):
+            self.assertIsNone(autotrade.entry_block_reason(
+                sample_market_row(price_change_1h=-1.0), {"risk_mode": "normal"}))
+            self.assertIsNone(autotrade.entry_block_reason(
+                sample_market_row(price_change_1h=0.2), {"risk_mode": "normal"}))
+            weak = sample_market_row(price_change_1h=-1.1)
+            holding = {"ticker": "KRW-ETH", "profit_pct": 0}
+            sell, _ = autotrade.should_sell_holding(holding, {"KRW-ETH": weak},
+                                                   {"risk_mode": "normal"}, {}, 10000)
+            self.assertFalse(sell)
+
+    def test_entry_inputs_are_not_in_public_decision_snapshot(self):
+        plan = autotrade.build_rebalance_plan(
+            [sample_market_row()], {"risk_mode": "normal"}, 100000, [],
+            {"count": 0, "avg_profit": 0, "loss_rate": 0}, now_ts=10000,
+        )
+        self.assertEqual(plan["entry_contexts"]["KRW-ETH"]["signal"]["p"], 1000)
+        payload = autotrade._decision_snapshot_payload(plan)
+        self.assertEqual(payload["strategy_version"], autotrade.STRATEGY_VERSION)
+        self.assertNotIn("entry_context", json.dumps(payload))
+        self.assertNotIn("signal", json.dumps(payload))
+
+    def test_market_observation_identifies_completed_candles_in_kst(self):
+        frames = []
+        for frequency in ("D", "h", "15min"):
+            index = pd.date_range("2026-01-01 09:00:00", periods=100, freq=frequency)
+            prices = [100 + number / 10 + (number % 7) / 5 for number in range(100)]
+            frames.append(pd.DataFrame({"open": prices, "close": prices,
+                                        "high": [value + 1 for value in prices],
+                                        "low": [value - 1 for value in prices],
+                                        "volume": [1000] * 100}, index=index))
+        with mock.patch.object(autotrade.pyupbit, "get_ohlcv", side_effect=frames), \
+                mock.patch.object(autotrade.pyupbit, "get_current_price", return_value=111), \
+                mock.patch.object(autotrade, "_sleep_api"):
+            data = autotrade.get_market_data("KRW-ETH")
+        self.assertIsNotNone(data)
+        for period, frame in zip(("daily", "1h", "15m"), frames):
+            self.assertEqual(data["completed_candle_started_at"][period],
+                             frame.index[-2].tz_localize("Asia/Seoul").isoformat())
+        self.assertIsNotNone(datetime.fromisoformat(data["observed_at"]).tzinfo)
+
+    def test_observation_journal_rotates_and_preserves_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.jsonl"
+            with mock.patch.object(autotrade, "OBSERVATION_MAX_BYTES", 1):
+                for index in range(5):
+                    self.assertTrue(autotrade.append_strategy_observation(
+                        {"krw": index, "decisions": []}, [sample_market_row()],
+                        {"risk_mode": "normal"}, [], {}, path=path))
+            self.assertEqual(len(list(Path(directory).iterdir())), 4)
+            current = json.loads(path.read_text())
+            oldest = json.loads(Path(str(path) + ".3").read_text())
+            self.assertEqual(current["krw"], 4)
+            self.assertEqual(oldest["krw"], 1)
+            self.assertEqual(current["market_data"][0]["price_change_1h"], 1.0)
+
+    def test_observation_failure_does_not_raise_into_trading_loop(self):
+        with mock.patch("builtins.open", side_effect=OSError("disk full")), \
+                self.assertLogs(autotrade.logger, level="ERROR"):
+            self.assertFalse(autotrade.append_strategy_observation({}, [], {}, [], {}))
+
+    def test_invalid_trade_history_does_not_reset_loss_cooldown(self):
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
+            f.write('{"truncated":')
+            f.flush()
+            with self.assertRaises(json.JSONDecodeError):
+                autotrade.load_recent_performance(f.name)
 
     def test_next_cycle_aligns_to_boundary_with_buffer(self):
         self.assertEqual(

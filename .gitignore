@@ -10,4 +10,5 @@ bot_state.json
 trade_history.json
 decision_history.json
 runtime_status.json
+strategy_observations.jsonl*
 .DS_Store
