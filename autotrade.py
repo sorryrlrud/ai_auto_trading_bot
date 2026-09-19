@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-STRATEGY_VERSION = "2026-09-09-momentum-audit"
+STRATEGY_VERSION = "2026-09-20-loss-cooldown-3h"
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
@@ -44,7 +44,7 @@ PROFIT_PROTECT_PCT = float(os.getenv("PROFIT_PROTECT_PCT", "1.2"))
 BASE_BUY_SCORE = float(os.getenv("BASE_BUY_SCORE", "10.0"))
 MIN_HOLD_SECONDS = int(os.getenv("MIN_HOLD_SECONDS", "3600"))
 TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
-LOSS_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_COOLDOWN_SECONDS", "7200")))
+LOSS_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_COOLDOWN_SECONDS", "10800")))
 CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20"))
 MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "12.0"))
 MIN_ENTRY_CHANGE_1H_PCT = float(os.getenv("MIN_ENTRY_CHANGE_1H_PCT", "-1.0"))
@@ -165,7 +165,12 @@ def setup_api():
 
     upbit = pyupbit.Upbit(access, secret)
     logger.info("Running rule-based mode. No LLM or Google API is used.")
-    logger.info("Strategy version=%s min_entry_change_1h_pct=%s", STRATEGY_VERSION, MIN_ENTRY_CHANGE_1H_PCT)
+    logger.info(
+        "Strategy version=%s min_entry_change_1h_pct=%s loss_cooldown_seconds=%s",
+        STRATEGY_VERSION,
+        MIN_ENTRY_CHANGE_1H_PCT,
+        LOSS_COOLDOWN_SECONDS,
+    )
     return upbit
 
 

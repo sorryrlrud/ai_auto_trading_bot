@@ -566,7 +566,7 @@ class TestTradingLogic(unittest.TestCase):
         )
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
 
-    def test_recent_realized_loss_blocks_cross_ticker_buy_for_two_hours(self):
+    def test_recent_realized_loss_blocks_cross_ticker_buy_for_three_hours(self):
         now_ts = 10_000
         plan = autotrade.build_rebalance_plan(
             market_data=[sample_market_row("KRW-STRONG")],
@@ -584,7 +584,7 @@ class TestTradingLogic(unittest.TestCase):
         )
 
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
-        self.assertEqual(plan["entry_block_reason"], "최근 실현 손실 후 2시간 신규 매수 휴지기")
+        self.assertEqual(plan["entry_block_reason"], "최근 실현 손실 후 3시간 신규 매수 휴지기")
 
     def test_cross_ticker_buy_resumes_after_loss_cooldown(self):
         now_ts = 10_000

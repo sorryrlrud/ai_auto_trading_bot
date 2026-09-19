@@ -15,6 +15,7 @@ class TestStrategyReview(unittest.TestCase):
         self.assertEqual(result["all_realized"]["net_profit_krw"], -10)
         self.assertEqual(result["negative_hour_momentum_entries"]["sell_count"], 1)
         self.assertEqual(result["entry_filter_diagnostic"]["with_negative_momentum_gate"]["sell_count"], 0)
+        self.assertIn("current_loss_cooldown", result["entry_filter_diagnostic"])
 
     def test_cooldown_uses_only_preceding_accepted_realized_losses(self):
         rows = [dict(entry_ts=1, exit_ts=5, profit_krw=-10, negative_hour_momentum=True),

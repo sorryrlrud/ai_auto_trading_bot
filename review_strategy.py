@@ -66,7 +66,7 @@ def match_entries(rows, log_text):
     return matched, unmatched
 
 
-def filter_recorded_entries(rows, block_negative_momentum=False, cooldown_seconds=7200):
+def filter_recorded_entries(rows, block_negative_momentum=False, cooldown_seconds=10800):
     """Chronological selection diagnostic, using only retained earlier losses."""
     events = []
     for index, row in enumerate(rows):
@@ -126,7 +126,7 @@ def make_review(history, log_text, since):
         baseline, _ = filter_recorded_entries(matched)
         candidate, _ = filter_recorded_entries(matched, block_negative_momentum=True)
         report["entry_filter_diagnostic"] = {
-            "current_two_hour_cooldown": summarize(baseline),
+            "current_loss_cooldown": summarize(baseline),
             "with_negative_momentum_gate": summarize(candidate),
         }
     return report
