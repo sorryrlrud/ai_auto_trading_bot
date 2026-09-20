@@ -312,6 +312,15 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - Automatic dashboard commit `b9f06f5` and public HTTP 200 payload both showed the 11:59:49 update, three recent decisions and the new version. Entry context was absent from the public payload. Bot-user GitHub SSH access worked.
 - The bot was defensive with no order decisions during verification. No verification trade was submitted. Profit improvement from the new entry filter remains unproven; see `STRATEGY_REVIEW_2026-09-09.md` for actual PnL, rejected alternatives and the counterfactual selection limits.
 
+## Deployment verified on 2026-09-21
+
+- Source revision: `d7e5430` (`2026-09-21-overextension-streak-brakes`). Local and isolated VM tests each passed 77 tests. The VM backup is `/home/sorryrlrud/bot-backup-20260921-ZVg2jt`; no dependency or image rebuild was needed.
+- Container started at 06:11:53 KST with restart count 0 and OOM false. Local/VM `autotrade.py` SHA-256: `c6c562b84ba6ca136b2671a27a10736f9332479c7ba9309dffcdc6b29ede4ec0`.
+- Startup logged `max_entry_bb_position=1.05` and the `3/43200s` loss-streak brake. Risk checks succeeded with one BTC holding and zero pending orders.
+- The first real cycle completed at 06:13:18 KST. It detected seven consecutive realized losses, kept BTC on HOLD, and blocked new entries for 12 hours after the latest loss. Consecutive failures and risk-check failures remained zero.
+- Automatic dashboard commit `f00ac45` was generated and pushed. The public GitHub Pages payload showed the 06:13:18 decision and the new strategy version; bot-user GitHub SSH access returned the same commit.
+- No verification order was submitted. The new safeguards only restrict entries; their forward performance remains unproven. See `STRATEGY_REVIEW_2026-09-21.md` for the fixed-exit diagnostics and limitations.
+
 ## Security notes
 
 - Do not place secrets, API keys, private key contents, or `.env` values in this file.
