@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-STRATEGY_VERSION = "2026-09-20-loss-cooldown-3h"
+STRATEGY_VERSION = "2026-09-21-overextension-streak-brakes"
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
@@ -45,8 +45,11 @@ BASE_BUY_SCORE = float(os.getenv("BASE_BUY_SCORE", "10.0"))
 MIN_HOLD_SECONDS = int(os.getenv("MIN_HOLD_SECONDS", "3600"))
 TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
 LOSS_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_COOLDOWN_SECONDS", "10800")))
+LOSS_STREAK_COUNT = max(0, int(os.getenv("LOSS_STREAK_COUNT", "3")))
+LOSS_STREAK_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_STREAK_COOLDOWN_SECONDS", "43200")))
 CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20"))
 MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "12.0"))
+MAX_ENTRY_BB_POSITION = float(os.getenv("MAX_ENTRY_BB_POSITION", "1.05"))
 MIN_ENTRY_CHANGE_1H_PCT = float(os.getenv("MIN_ENTRY_CHANGE_1H_PCT", "-1.0"))
 ALLOW_DEFENSIVE_BUYS = os.getenv("ALLOW_DEFENSIVE_BUYS", "false").lower() == "true"
 EXCLUDED_ENTRY_TICKERS = {
@@ -166,10 +169,14 @@ def setup_api():
     upbit = pyupbit.Upbit(access, secret)
     logger.info("Running rule-based mode. No LLM or Google API is used.")
     logger.info(
-        "Strategy version=%s min_entry_change_1h_pct=%s loss_cooldown_seconds=%s",
+        "Strategy version=%s min_entry_change_1h_pct=%s max_entry_bb_position=%s "
+        "loss_cooldown_seconds=%s loss_streak=%s/%ss",
         STRATEGY_VERSION,
         MIN_ENTRY_CHANGE_1H_PCT,
+        MAX_ENTRY_BB_POSITION,
         LOSS_COOLDOWN_SECONDS,
+        LOSS_STREAK_COUNT,
+        LOSS_STREAK_COOLDOWN_SECONDS,
     )
     return upbit
 
@@ -190,6 +197,11 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
     recent = realized_rows[-limit:]
     profits = [safe_float(row.get("profit_pct", row.get("profit"))) for row in recent]
     losses = [p for p in profits if p < 0]
+    consecutive_losses = 0
+    for profit in reversed(profits):
+        if profit >= 0:
+            break
+        consecutive_losses += 1
     last_loss_ts = 0.0
     for row, profit in zip(recent, profits):
         if profit >= 0 or not row.get("executed_at"):
@@ -206,6 +218,7 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
         "loss_rate": round(len(losses) / len(profits), 3) if profits else 0.0,
         "net_profit": round(sum(profits), 3),
         "last_loss_ts": last_loss_ts,
+        "consecutive_losses": consecutive_losses,
     }
 
 
@@ -386,7 +399,10 @@ def append_strategy_observation(plan, market_data, market_context, holdings, rec
         "plan": _decision_snapshot_payload(plan),
         "entry_rules": {"min_change_1h_pct": MIN_ENTRY_CHANGE_1H_PCT,
                         "max_atr_pct": MAX_ENTRY_ATR_PCT,
-                        "loss_cooldown_seconds": LOSS_COOLDOWN_SECONDS},
+                        "max_bb_position": MAX_ENTRY_BB_POSITION,
+                        "loss_cooldown_seconds": LOSS_COOLDOWN_SECONDS,
+                        "loss_streak_count": LOSS_STREAK_COUNT,
+                        "loss_streak_cooldown_seconds": LOSS_STREAK_COOLDOWN_SECONDS},
     }
     try:
         # Serialize before rotating, so invalid input cannot displace a good file.
@@ -779,6 +795,8 @@ def entry_block_reason(data, market_context):
         return "BTC 방어장세에서는 신규 매수 차단"
     if data["atr_pct"] > MAX_ENTRY_ATR_PCT:
         return f"ATR {data['atr_pct']}% > {MAX_ENTRY_ATR_PCT}%"
+    if daily["bb_position"] > MAX_ENTRY_BB_POSITION:
+        return f"볼린저밴드 과열({daily['bb_position']} > {MAX_ENTRY_BB_POSITION})"
     if data["price_change_1h"] < MIN_ENTRY_CHANGE_1H_PCT:
         return f"1시간 하락 모멘텀({data['price_change_1h']}% < {MIN_ENTRY_CHANGE_1H_PCT}%)"
     if not daily["ma20_over_60"]:
@@ -915,12 +933,22 @@ def is_buy_cooldown(ticker, state, now_ts):
     return last_exit_ts and now_ts - last_exit_ts < TRADE_COOLDOWN_SECONDS
 
 
+def effective_loss_cooldown_seconds(recent_performance):
+    if (
+        LOSS_STREAK_COUNT
+        and recent_performance.get("consecutive_losses", 0) >= LOSS_STREAK_COUNT
+    ):
+        return max(LOSS_COOLDOWN_SECONDS, LOSS_STREAK_COOLDOWN_SECONDS)
+    return LOSS_COOLDOWN_SECONDS
+
+
 def is_loss_cooldown(recent_performance, now_ts):
     last_loss_ts = safe_float(recent_performance.get("last_loss_ts"))
+    cooldown_seconds = effective_loss_cooldown_seconds(recent_performance)
     return bool(
-        LOSS_COOLDOWN_SECONDS
+        cooldown_seconds
         and last_loss_ts
-        and now_ts - last_loss_ts < LOSS_COOLDOWN_SECONDS
+        and now_ts - last_loss_ts < cooldown_seconds
     )
 
 
@@ -975,7 +1003,8 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
     if market_context.get("risk_mode") == "defensive" and not ALLOW_DEFENSIVE_BUYS:
         entry_gate = "BTC 방어장세에서는 신규 매수 차단"
     elif is_loss_cooldown(recent_performance, now_ts):
-        cooldown_minutes = max(math.ceil(LOSS_COOLDOWN_SECONDS / 60), 1)
+        cooldown_seconds = effective_loss_cooldown_seconds(recent_performance)
+        cooldown_minutes = max(math.ceil(cooldown_seconds / 60), 1)
         if cooldown_minutes % 60 == 0:
             cooldown_duration = f"{cooldown_minutes // 60}시간"
         else:
@@ -1068,6 +1097,7 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
                 "score": candidate["score"],
                 "buy_threshold": threshold,
                 "min_entry_change_1h_pct": MIN_ENTRY_CHANGE_1H_PCT,
+                "max_entry_bb_position": MAX_ENTRY_BB_POSITION,
             }
             for candidate in selected_candidates
         },

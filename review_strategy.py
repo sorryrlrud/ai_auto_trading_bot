@@ -18,6 +18,9 @@ from pathlib import Path
 
 
 KST = timezone(timedelta(hours=9))
+MAX_ENTRY_BB_POSITION = 1.05
+LOSS_STREAK_COUNT = 3
+LOSS_STREAK_COOLDOWN_SECONDS = 43200
 BUY_LINE = re.compile(
     r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ - INFO - "
     r"\[BUY\] (KRW-\S+) \d+ KRW \| (score .+)$"
@@ -60,30 +63,50 @@ def match_entries(rows, log_text):
             unmatched.append(row)
             continue
         buy = max(candidates, key=lambda item: item["at"])
+        signal = (row.get("entry_context") or {}).get("signal") or {}
+        daily = (signal.get("indicators") or {}).get("daily") or {}
+        bb_position = daily.get("bb_position")
+        bb_limit = (row.get("entry_context") or {}).get(
+            "max_entry_bb_position", MAX_ENTRY_BB_POSITION
+        )
         matched.append(dict(row, entry_ts=buy["at"], exit_ts=sold_at,
                             # Historical logs expose this exact existing score reason.
-                            negative_hour_momentum="1h weak" in buy["reason"]))
+                            negative_hour_momentum="1h weak" in buy["reason"],
+                            bb_overextended=(bb_position is not None and bb_position > bb_limit)))
     return matched, unmatched
 
 
-def filter_recorded_entries(rows, block_negative_momentum=False, cooldown_seconds=10800):
+def filter_recorded_entries(rows, block_negative_momentum=False, block_bb_overextended=False,
+                            cooldown_seconds=10800, loss_streak_count=0,
+                            loss_streak_cooldown_seconds=0):
     """Chronological selection diagnostic, using only retained earlier losses."""
     events = []
     for index, row in enumerate(rows):
         events.extend([(row["entry_ts"], 1, index), (row["exit_ts"], 0, index)])
     accepted, reasons = set(), {}
     last_loss = None
+    consecutive_losses = 0
     for at, side, index in sorted(events):
         row = rows[index]
         if side == 1:
             if last_loss is not None and at - last_loss < cooldown_seconds:
                 reasons[index] = "loss_cooldown"
+            elif (loss_streak_count and consecutive_losses >= loss_streak_count
+                  and last_loss is not None
+                  and at - last_loss < loss_streak_cooldown_seconds):
+                reasons[index] = "loss_streak_cooldown"
             elif block_negative_momentum and row["negative_hour_momentum"]:
                 reasons[index] = "negative_hour_momentum"
+            elif block_bb_overextended and row.get("bb_overextended"):
+                reasons[index] = "bb_overextended"
             else:
                 accepted.add(index)
-        elif index in accepted and float(row["profit_krw"]) < 0:
-            last_loss = at
+        elif index in accepted:
+            if float(row["profit_krw"]) < 0:
+                last_loss = at
+                consecutive_losses += 1
+            else:
+                consecutive_losses = 0
     return [row for index, row in enumerate(rows) if index in accepted], reasons
 
 
@@ -118,6 +141,7 @@ def make_review(history, log_text, since):
             "A prior-rule trade sample is not out-of-sample evidence for the current strategy.",
             "Filtering fixes actual quantities, fees and exits; it cannot model replacement entries or capital reuse.",
             "Cooldown starts from the selected sample's observed losses; earlier open positions are not replayed.",
+            "The Bollinger gate only evaluates sells with recorded entry context; older rows remain selected.",
         ],
     }
     if ambiguous_entries:
@@ -125,9 +149,24 @@ def make_review(history, log_text, since):
     else:
         baseline, _ = filter_recorded_entries(matched)
         candidate, _ = filter_recorded_entries(matched, block_negative_momentum=True)
+        bb_gate, _ = filter_recorded_entries(matched, block_bb_overextended=True)
+        streak_gate, _ = filter_recorded_entries(
+            matched,
+            loss_streak_count=LOSS_STREAK_COUNT,
+            loss_streak_cooldown_seconds=LOSS_STREAK_COOLDOWN_SECONDS,
+        )
+        combined, _ = filter_recorded_entries(
+            matched,
+            block_bb_overextended=True,
+            loss_streak_count=LOSS_STREAK_COUNT,
+            loss_streak_cooldown_seconds=LOSS_STREAK_COOLDOWN_SECONDS,
+        )
         report["entry_filter_diagnostic"] = {
             "current_loss_cooldown": summarize(baseline),
             "with_negative_momentum_gate": summarize(candidate),
+            "with_bb_position_gate": summarize(bb_gate),
+            "with_three_loss_streak_cooldown": summarize(streak_gate),
+            "with_both_new_safeguards": summarize(combined),
         }
     return report
 

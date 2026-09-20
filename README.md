@@ -38,7 +38,11 @@ The rule engine keeps at least the market- and performance-dependent cash reserv
 
 New entries also require the completed-candle one-hour return to be at least `MIN_ENTRY_CHANGE_1H_PCT` (default `-1.0%`). Previously this weakness only reduced the score and a high aggregate score could still buy it. This is an entry rule; it does not force an exit from an existing position. The September 9 review did not establish an incremental net-profit improvement over the corrected two-hour cooldown. See [the review](STRATEGY_REVIEW_2026-09-09.md) for the measured tradeoffs.
 
+New entries are also blocked when the daily Bollinger position exceeds `MAX_ENTRY_BB_POSITION` (default `1.05`). The same level was already treated as an overheated exit signal; applying it before entry prevents buying a candidate that the exit logic already considers extended.
+
 After any realized losing sell, the bot pauses all new entries for `LOSS_COOLDOWN_SECONDS` (default `10800`, or three hours). Existing holdings continue to be monitored and sold normally during this portfolio-wide cooling-off period. The existing `TRADE_COOLDOWN_SECONDS` remains a separate per-ticker re-entry guard.
+
+When the latest realized results contain at least `LOSS_STREAK_COUNT` consecutive losses (default `3`), the portfolio-wide pause is extended to `LOSS_STREAK_COOLDOWN_SECONDS` (default `43200`, or twelve hours) after the latest loss. A profitable or break-even realized sell resets the streak. This circuit breaker never delays monitoring or selling an existing holding.
 
 The existing hard stop (`STOP_LOSS_PCT`, default `-2.2%` before fees) is checked every `RISK_CHECK_SECONDS` (default `60`) between rebalance cycles and during market scans. Entry and indicator-based exit decisions still follow the 15-minute cycle. Checks run in the same process, so API calls and dashboard publishing can delay them; a market stop does not guarantee the threshold price. Dashboard subprocesses have bounded timeouts. Holdings are refreshed after each market scan before the rebalance plan is built.
 

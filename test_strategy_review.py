@@ -22,9 +22,28 @@ class TestStrategyReview(unittest.TestCase):
                 dict(entry_ts=6, exit_ts=9, profit_krw=20, negative_hour_momentum=False),
                 dict(entry_ts=15, exit_ts=20, profit_krw=-10, negative_hour_momentum=False)]
         baseline, _ = review.filter_recorded_entries(rows, cooldown_seconds=10)
-        candidate, _ = review.filter_recorded_entries(rows, True, cooldown_seconds=10)
+        candidate, _ = review.filter_recorded_entries(
+            rows, block_negative_momentum=True, cooldown_seconds=10
+        )
         self.assertEqual([row["entry_ts"] for row in baseline], [1, 15])
         self.assertEqual([row["entry_ts"] for row in candidate], [6, 15])
+
+    def test_loss_streak_cooldown_blocks_later_spaced_entry(self):
+        rows = [dict(entry_ts=1, exit_ts=2, profit_krw=-10, negative_hour_momentum=False),
+                dict(entry_ts=12, exit_ts=13, profit_krw=-10, negative_hour_momentum=False),
+                dict(entry_ts=23, exit_ts=24, profit_krw=-10, negative_hour_momentum=False),
+                dict(entry_ts=35, exit_ts=36, profit_krw=20, negative_hour_momentum=False)]
+        baseline, _ = review.filter_recorded_entries(rows, cooldown_seconds=10)
+        candidate, reasons = review.filter_recorded_entries(
+            rows,
+            cooldown_seconds=10,
+            loss_streak_count=3,
+            loss_streak_cooldown_seconds=20,
+        )
+
+        self.assertEqual(len(baseline), 4)
+        self.assertEqual(len(candidate), 3)
+        self.assertEqual(reasons[3], "loss_streak_cooldown")
 
     def test_partial_exits_are_not_treated_as_independent_entries(self):
         history = [dict(side="SELL", ticker="KRW-A", profit_krw=-10, fee_krw=1,

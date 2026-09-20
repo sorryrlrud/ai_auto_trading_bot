@@ -135,6 +135,7 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(perf["count"], 2)
         self.assertEqual(perf["avg_profit"], 0.5)
         self.assertEqual(perf["net_profit"], 1.0)
+        self.assertEqual(perf["consecutive_losses"], 1)
 
     def test_recent_performance_tracks_latest_realized_loss_time(self):
         with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
@@ -605,6 +606,39 @@ class TestTradingLogic(unittest.TestCase):
 
         self.assertTrue([d for d in plan["decisions"] if d["decision"] == "BUY"])
 
+    def test_three_loss_streak_extends_cross_ticker_cooldown(self):
+        now_ts = 100_000
+        recent_performance = {
+            "count": 5,
+            "avg_profit": -1.0,
+            "loss_rate": 0.8,
+            "net_profit": -5.0,
+            "last_loss_ts": now_ts - autotrade.LOSS_COOLDOWN_SECONDS,
+            "consecutive_losses": autotrade.LOSS_STREAK_COUNT,
+        }
+        plan = autotrade.build_rebalance_plan(
+            [sample_market_row("KRW-STRONG")],
+            {"risk_mode": "normal", "market_volatility": "normal"},
+            100000,
+            [],
+            recent_performance,
+            now_ts=now_ts,
+        )
+
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+        self.assertEqual(plan["entry_block_reason"], "최근 실현 손실 후 12시간 신규 매수 휴지기")
+
+        resumed = autotrade.build_rebalance_plan(
+            [sample_market_row("KRW-STRONG")],
+            {"risk_mode": "normal", "market_volatility": "normal"},
+            100000,
+            [],
+            dict(recent_performance,
+                 last_loss_ts=now_ts - autotrade.LOSS_STREAK_COOLDOWN_SECONDS),
+            now_ts=now_ts,
+        )
+        self.assertTrue([d for d in resumed["decisions"] if d["decision"] == "BUY"])
+
     def test_excluded_entry_ticker_is_not_bought(self):
         plan = autotrade.build_rebalance_plan(
             market_data=[sample_market_row("KRW-USDT")],
@@ -696,6 +730,19 @@ class TestTradingLogic(unittest.TestCase):
             recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
         )
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+    def test_bollinger_overextension_is_hard_blocked(self):
+        overextended = sample_market_row("KRW-EXTENDED", bb_position=1.06)
+        plan = autotrade.build_rebalance_plan(
+            [overextended],
+            {"risk_mode": "normal", "market_volatility": "normal"},
+            100000,
+            [],
+            {"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+        self.assertIn("볼린저밴드 과열", plan["entry_rejections"][0]["reason"])
 
     def test_small_loss_needs_hour_and_short_break_before_sell(self):
         holding = {
