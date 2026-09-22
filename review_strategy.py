@@ -21,6 +21,7 @@ KST = timezone(timedelta(hours=9))
 MAX_ENTRY_BB_POSITION = 1.05
 LOSS_STREAK_COUNT = 3
 LOSS_STREAK_COOLDOWN_SECONDS = 43200
+LOSS_TICKER_COOLDOWN_SECONDS = 43200
 BUY_LINE = re.compile(
     r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ - INFO - "
     r"\[BUY\] (KRW-\S+) \d+ KRW \| (score .+)$"
@@ -78,7 +79,8 @@ def match_entries(rows, log_text):
 
 def filter_recorded_entries(rows, block_negative_momentum=False, block_bb_overextended=False,
                             cooldown_seconds=10800, loss_streak_count=0,
-                            loss_streak_cooldown_seconds=0):
+                            loss_streak_cooldown_seconds=0,
+                            loss_ticker_cooldown_seconds=0):
     """Chronological selection diagnostic, using only retained earlier losses."""
     events = []
     for index, row in enumerate(rows):
@@ -86,15 +88,20 @@ def filter_recorded_entries(rows, block_negative_momentum=False, block_bb_overex
     accepted, reasons = set(), {}
     last_loss = None
     consecutive_losses = 0
+    last_ticker_loss = {}
     for at, side, index in sorted(events):
         row = rows[index]
         if side == 1:
             if last_loss is not None and at - last_loss < cooldown_seconds:
                 reasons[index] = "loss_cooldown"
             elif (loss_streak_count and consecutive_losses >= loss_streak_count
-                  and last_loss is not None
-                  and at - last_loss < loss_streak_cooldown_seconds):
+                and last_loss is not None
+                and at - last_loss < loss_streak_cooldown_seconds):
                 reasons[index] = "loss_streak_cooldown"
+            elif (loss_ticker_cooldown_seconds
+                  and row["ticker"] in last_ticker_loss
+                  and at - last_ticker_loss[row["ticker"]] < loss_ticker_cooldown_seconds):
+                reasons[index] = "loss_ticker_cooldown"
             elif block_negative_momentum and row["negative_hour_momentum"]:
                 reasons[index] = "negative_hour_momentum"
             elif block_bb_overextended and row.get("bb_overextended"):
@@ -105,8 +112,12 @@ def filter_recorded_entries(rows, block_negative_momentum=False, block_bb_overex
             if float(row["profit_krw"]) < 0:
                 last_loss = at
                 consecutive_losses += 1
+                if row.get("ticker"):
+                    last_ticker_loss[row["ticker"]] = at
             else:
                 consecutive_losses = 0
+                if row.get("ticker"):
+                    last_ticker_loss.pop(row["ticker"], None)
     return [row for index, row in enumerate(rows) if index in accepted], reasons
 
 
@@ -141,6 +152,7 @@ def make_review(history, log_text, since):
             "A prior-rule trade sample is not out-of-sample evidence for the current strategy.",
             "Filtering fixes actual quantities, fees and exits; it cannot model replacement entries or capital reuse.",
             "Cooldown starts from the selected sample's observed losses; earlier open positions are not replayed.",
+            "The ticker-loss gate fixes actual fills and cannot model replacement entries while a loser is blocked.",
             "The Bollinger gate only evaluates sells with recorded entry context; older rows remain selected.",
         ],
     }
@@ -155,18 +167,24 @@ def make_review(history, log_text, since):
             loss_streak_count=LOSS_STREAK_COUNT,
             loss_streak_cooldown_seconds=LOSS_STREAK_COOLDOWN_SECONDS,
         )
+        ticker_loss_gate, _ = filter_recorded_entries(
+            matched,
+            loss_ticker_cooldown_seconds=LOSS_TICKER_COOLDOWN_SECONDS,
+        )
         combined, _ = filter_recorded_entries(
             matched,
             block_bb_overextended=True,
             loss_streak_count=LOSS_STREAK_COUNT,
             loss_streak_cooldown_seconds=LOSS_STREAK_COOLDOWN_SECONDS,
+            loss_ticker_cooldown_seconds=LOSS_TICKER_COOLDOWN_SECONDS,
         )
         report["entry_filter_diagnostic"] = {
             "current_loss_cooldown": summarize(baseline),
             "with_negative_momentum_gate": summarize(candidate),
             "with_bb_position_gate": summarize(bb_gate),
             "with_three_loss_streak_cooldown": summarize(streak_gate),
-            "with_both_new_safeguards": summarize(combined),
+            "with_loss_ticker_cooldown": summarize(ticker_loss_gate),
+            "with_all_safeguards": summarize(combined),
         }
     return report
 

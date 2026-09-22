@@ -45,6 +45,22 @@ class TestStrategyReview(unittest.TestCase):
         self.assertEqual(len(candidate), 3)
         self.assertEqual(reasons[3], "loss_streak_cooldown")
 
+    def test_loss_ticker_cooldown_only_blocks_recent_loser(self):
+        rows = [dict(ticker="KRW-A", entry_ts=1, exit_ts=2, profit_krw=-10,
+                     negative_hour_momentum=False),
+                dict(ticker="KRW-B", entry_ts=13, exit_ts=14, profit_krw=20,
+                     negative_hour_momentum=False),
+                dict(ticker="KRW-A", entry_ts=15, exit_ts=16, profit_krw=-5,
+                     negative_hour_momentum=False)]
+        candidate, reasons = review.filter_recorded_entries(
+            rows,
+            cooldown_seconds=10,
+            loss_ticker_cooldown_seconds=20,
+        )
+
+        self.assertEqual([row["ticker"] for row in candidate], ["KRW-A", "KRW-B"])
+        self.assertEqual(reasons[2], "loss_ticker_cooldown")
+
     def test_partial_exits_are_not_treated_as_independent_entries(self):
         history = [dict(side="SELL", ticker="KRW-A", profit_krw=-10, fee_krw=1,
                         executed_at=f"2026-09-01T{hour}:00:00+09:00") for hour in ("12", "13")]

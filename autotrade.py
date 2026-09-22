@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-STRATEGY_VERSION = "2026-09-21-overextension-streak-brakes"
+STRATEGY_VERSION = "2026-09-23-loss-ticker-cooldown"
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
@@ -44,6 +44,10 @@ PROFIT_PROTECT_PCT = float(os.getenv("PROFIT_PROTECT_PCT", "1.2"))
 BASE_BUY_SCORE = float(os.getenv("BASE_BUY_SCORE", "10.0"))
 MIN_HOLD_SECONDS = int(os.getenv("MIN_HOLD_SECONDS", "3600"))
 TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
+LOSS_TICKER_COOLDOWN_SECONDS = max(
+    TRADE_COOLDOWN_SECONDS,
+    int(os.getenv("LOSS_TICKER_COOLDOWN_SECONDS", "43200")),
+)
 LOSS_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_COOLDOWN_SECONDS", "10800")))
 LOSS_STREAK_COUNT = max(0, int(os.getenv("LOSS_STREAK_COUNT", "3")))
 LOSS_STREAK_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_STREAK_COOLDOWN_SECONDS", "43200")))
@@ -170,10 +174,13 @@ def setup_api():
     logger.info("Running rule-based mode. No LLM or Google API is used.")
     logger.info(
         "Strategy version=%s min_entry_change_1h_pct=%s max_entry_bb_position=%s "
+        "trade_cooldown_seconds=%s loss_ticker_cooldown_seconds=%s "
         "loss_cooldown_seconds=%s loss_streak=%s/%ss",
         STRATEGY_VERSION,
         MIN_ENTRY_CHANGE_1H_PCT,
         MAX_ENTRY_BB_POSITION,
+        TRADE_COOLDOWN_SECONDS,
+        LOSS_TICKER_COOLDOWN_SECONDS,
         LOSS_COOLDOWN_SECONDS,
         LOSS_STREAK_COUNT,
         LOSS_STREAK_COOLDOWN_SECONDS,
@@ -212,6 +219,23 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
         except (TypeError, ValueError):
             continue
 
+    last_realized_by_ticker = {}
+    for row in realized_rows:
+        ticker = row.get("ticker")
+        if not ticker or not row.get("executed_at"):
+            continue
+        try:
+            executed_at = datetime.fromisoformat(str(row["executed_at"]).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        result = {
+            "executed_at_ts": executed_at.timestamp(),
+            "profit_pct": safe_float(row.get("profit_pct", row.get("profit"))),
+        }
+        previous = last_realized_by_ticker.get(ticker)
+        if previous is None or result["executed_at_ts"] >= previous["executed_at_ts"]:
+            last_realized_by_ticker[ticker] = result
+
     return {
         "count": len(profits),
         "avg_profit": round(sum(profits) / len(profits), 3) if profits else 0.0,
@@ -219,6 +243,7 @@ def load_recent_performance(path=TRADE_HISTORY_FILE, limit=20):
         "net_profit": round(sum(profits), 3),
         "last_loss_ts": last_loss_ts,
         "consecutive_losses": consecutive_losses,
+        "last_realized_by_ticker": last_realized_by_ticker,
     }
 
 
@@ -400,6 +425,8 @@ def append_strategy_observation(plan, market_data, market_context, holdings, rec
         "entry_rules": {"min_change_1h_pct": MIN_ENTRY_CHANGE_1H_PCT,
                         "max_atr_pct": MAX_ENTRY_ATR_PCT,
                         "max_bb_position": MAX_ENTRY_BB_POSITION,
+                        "trade_cooldown_seconds": TRADE_COOLDOWN_SECONDS,
+                        "loss_ticker_cooldown_seconds": LOSS_TICKER_COOLDOWN_SECONDS,
                         "loss_cooldown_seconds": LOSS_COOLDOWN_SECONDS,
                         "loss_streak_count": LOSS_STREAK_COUNT,
                         "loss_streak_cooldown_seconds": LOSS_STREAK_COOLDOWN_SECONDS},
@@ -927,10 +954,19 @@ def holding_age_seconds(holding, state, now_ts):
     return max(now_ts - last_buy_ts, 0)
 
 
-def is_buy_cooldown(ticker, state, now_ts):
+def is_buy_cooldown(ticker, state, now_ts, recent_performance=None):
     trade = state.get("trades", {}).get(ticker, {})
     last_exit_ts = max(trade.get("last_sell_ts", 0), trade.get("last_buy_ts", 0))
-    return last_exit_ts and now_ts - last_exit_ts < TRADE_COOLDOWN_SECONDS
+    if last_exit_ts and now_ts - last_exit_ts < TRADE_COOLDOWN_SECONDS:
+        return True
+
+    latest = (recent_performance or {}).get("last_realized_by_ticker", {}).get(ticker, {})
+    last_realized_ts = safe_float(latest.get("executed_at_ts"))
+    return bool(
+        safe_float(latest.get("profit_pct")) < 0
+        and last_realized_ts
+        and now_ts - last_realized_ts < LOSS_TICKER_COOLDOWN_SECONDS
+    )
 
 
 def effective_loss_cooldown_seconds(recent_performance):
@@ -1044,7 +1080,7 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
         ticker = row["coin"]
         if ticker in held_tickers:
             continue
-        if is_buy_cooldown(ticker, state, now_ts):
+        if is_buy_cooldown(ticker, state, now_ts, recent_performance):
             continue
         rejected = entry_gate or entry_block_reason(row, market_context)
         if rejected:
@@ -1098,6 +1134,7 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
                 "buy_threshold": threshold,
                 "min_entry_change_1h_pct": MIN_ENTRY_CHANGE_1H_PCT,
                 "max_entry_bb_position": MAX_ENTRY_BB_POSITION,
+                "loss_ticker_cooldown_seconds": LOSS_TICKER_COOLDOWN_SECONDS,
             }
             for candidate in selected_candidates
         },

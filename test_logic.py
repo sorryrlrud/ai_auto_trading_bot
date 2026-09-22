@@ -136,14 +136,15 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(perf["avg_profit"], 0.5)
         self.assertEqual(perf["net_profit"], 1.0)
         self.assertEqual(perf["consecutive_losses"], 1)
+        self.assertEqual(perf["last_realized_by_ticker"], {})
 
     def test_recent_performance_tracks_latest_realized_loss_time(self):
         with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
             json.dump(
                 [
-                    {"side": "SELL", "profit_pct": -1.0, "executed_at": "2026-09-08T06:00:00+09:00"},
+                    {"side": "SELL", "ticker": "KRW-A", "profit_pct": -1.0, "executed_at": "2026-09-08T06:00:00+09:00"},
                     {"side": "SELL", "profit_pct": 2.0, "executed_at": "2026-09-08T07:00:00+09:00"},
-                    {"side": "SELL", "profit_pct": -0.5, "executed_at": "2026-09-08T08:00:00+09:00"},
+                    {"side": "SELL", "ticker": "KRW-A", "profit_pct": -0.5, "executed_at": "2026-09-08T08:00:00+09:00"},
                 ],
                 f,
             )
@@ -152,6 +153,10 @@ class TestTradingLogic(unittest.TestCase):
 
         expected = datetime.fromisoformat("2026-09-08T08:00:00+09:00").timestamp()
         self.assertEqual(perf["last_loss_ts"], expected)
+        self.assertEqual(perf["last_realized_by_ticker"]["KRW-A"], {
+            "executed_at_ts": expected,
+            "profit_pct": -0.5,
+        })
 
     def test_dashboard_ignores_ambiguous_legacy_trade_rows(self):
         with tempfile.NamedTemporaryFile("w+", encoding="utf-8") as f:
@@ -566,6 +571,63 @@ class TestTradingLogic(unittest.TestCase):
             now_ts=now_ts,
         )
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+    def test_recent_ticker_loss_extends_only_that_tickers_cooldown(self):
+        now_ts = 100_000
+        recent_performance = {
+            "count": 2,
+            "avg_profit": 0,
+            "loss_rate": 0.5,
+            "net_profit": 0,
+            "last_realized_by_ticker": {
+                "KRW-LOSER": {"executed_at_ts": now_ts - 7 * 3600, "profit_pct": -2.0},
+                "KRW-WINNER": {"executed_at_ts": now_ts - 7 * 3600, "profit_pct": 2.0},
+            },
+        }
+        state = {"trades": {
+            "KRW-LOSER": {"last_sell_ts": now_ts - 7 * 3600},
+            "KRW-WINNER": {"last_sell_ts": now_ts - 7 * 3600},
+        }}
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-LOSER"), sample_market_row("KRW-WINNER")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance=recent_performance,
+            state=state,
+            now_ts=now_ts,
+        )
+
+        buys = [d["ticker"] for d in plan["decisions"] if d["decision"] == "BUY"]
+        self.assertEqual(buys, ["KRW-WINNER"])
+
+    def test_ticker_loss_cooldown_expires_after_twelve_hours(self):
+        now_ts = 100_000
+        recent_performance = {
+            "count": 1,
+            "avg_profit": -2,
+            "loss_rate": 1,
+            "net_profit": -2,
+            "last_realized_by_ticker": {
+                "KRW-STRONG": {
+                    "executed_at_ts": now_ts - autotrade.LOSS_TICKER_COOLDOWN_SECONDS,
+                    "profit_pct": -2.0,
+                },
+            },
+        }
+        plan = autotrade.build_rebalance_plan(
+            market_data=[sample_market_row("KRW-STRONG")],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance=recent_performance,
+            state={"trades": {"KRW-STRONG": {
+                "last_sell_ts": now_ts - autotrade.LOSS_TICKER_COOLDOWN_SECONDS,
+            }}},
+            now_ts=now_ts,
+        )
+
+        self.assertTrue([d for d in plan["decisions"] if d["decision"] == "BUY"])
 
     def test_recent_realized_loss_blocks_cross_ticker_buy_for_three_hours(self):
         now_ts = 10_000
