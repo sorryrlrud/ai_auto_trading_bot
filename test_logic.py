@@ -783,7 +783,7 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(plan["entry_block_reason"], "BTC 방어장세에서는 신규 매수 차단")
 
     def test_high_atr_candidate_is_hard_blocked(self):
-        volatile = sample_market_row("KRW-VOLATILE", atr_pct=12.5)
+        volatile = sample_market_row("KRW-VOLATILE", atr_pct=6.1)
         plan = autotrade.build_rebalance_plan(
             market_data=[volatile],
             market_context={"risk_mode": "normal", "market_volatility": "normal"},
@@ -792,6 +792,21 @@ class TestTradingLogic(unittest.TestCase):
             recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
         )
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+
+    def test_atr_candidate_at_limit_can_be_bought(self):
+        candidate = sample_market_row("KRW-AT-LIMIT", atr_pct=6.0)
+        plan = autotrade.build_rebalance_plan(
+            market_data=[candidate],
+            market_context={"risk_mode": "normal", "market_volatility": "normal"},
+            krw=100000,
+            current_holdings=[],
+            recent_performance={"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+
+        self.assertEqual(
+            [d["ticker"] for d in plan["decisions"] if d["decision"] == "BUY"],
+            ["KRW-AT-LIMIT"],
+        )
 
     def test_bollinger_overextension_is_hard_blocked(self):
         overextended = sample_market_row("KRW-EXTENDED", bb_position=1.06)
@@ -865,6 +880,10 @@ class TestTradingLogic(unittest.TestCase):
             {"count": 0, "avg_profit": 0, "loss_rate": 0}, now_ts=10000,
         )
         self.assertEqual(plan["entry_contexts"]["KRW-ETH"]["signal"]["p"], 1000)
+        self.assertEqual(
+            plan["entry_contexts"]["KRW-ETH"]["max_entry_atr_pct"],
+            autotrade.MAX_ENTRY_ATR_PCT,
+        )
         payload = autotrade._decision_snapshot_payload(plan)
         self.assertEqual(payload["strategy_version"], autotrade.STRATEGY_VERSION)
         self.assertNotIn("entry_context", json.dumps(payload))

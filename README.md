@@ -40,6 +40,8 @@ New entries also require the completed-candle one-hour return to be at least `MI
 
 New entries are also blocked when the daily Bollinger position exceeds `MAX_ENTRY_BB_POSITION` (default `1.05`). The same level was already treated as an overheated exit signal; applying it before entry prevents buying a candidate that the exit logic already considers extended.
 
+New entries are blocked when completed-candle ATR exceeds `MAX_ENTRY_ATR_PCT` (default `6.0%`). This tighter volatility gate only affects entries; existing positions still receive the same 60-second hard-stop checks and ordinary exit handling.
+
 After any realized losing sell, the bot pauses all new entries for `LOSS_COOLDOWN_SECONDS` (default `10800`, or three hours). Existing holdings continue to be monitored and sold normally during this portfolio-wide cooling-off period. The per-ticker `TRADE_COOLDOWN_SECONDS` remains six hours after any trade, while a ticker whose latest realized sell was a loss stays blocked for `LOSS_TICKER_COOLDOWN_SECONDS` (default `43200`, or twelve hours). A profitable ticker can therefore resume after the original six-hour guard, but the bot cannot immediately retry a recent loser when the same signal regime persists.
 
 When the latest realized results contain at least `LOSS_STREAK_COUNT` consecutive losses (default `3`), the portfolio-wide pause is extended to `LOSS_STREAK_COOLDOWN_SECONDS` (default `43200`, or twelve hours) after the latest loss. A profitable or break-even realized sell resets the streak. This circuit breaker never delays monitoring or selling an existing holding.

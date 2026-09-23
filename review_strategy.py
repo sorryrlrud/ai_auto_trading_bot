@@ -18,6 +18,7 @@ from pathlib import Path
 
 
 KST = timezone(timedelta(hours=9))
+MAX_ENTRY_ATR_PCT = 6.0
 MAX_ENTRY_BB_POSITION = 1.05
 LOSS_STREAK_COUNT = 3
 LOSS_STREAK_COOLDOWN_SECONDS = 43200
@@ -70,14 +71,20 @@ def match_entries(rows, log_text):
         bb_limit = (row.get("entry_context") or {}).get(
             "max_entry_bb_position", MAX_ENTRY_BB_POSITION
         )
+        atr_pct = signal.get("atr_pct")
+        atr_limit = (row.get("entry_context") or {}).get(
+            "max_entry_atr_pct", MAX_ENTRY_ATR_PCT
+        )
         matched.append(dict(row, entry_ts=buy["at"], exit_ts=sold_at,
                             # Historical logs expose this exact existing score reason.
                             negative_hour_momentum="1h weak" in buy["reason"],
-                            bb_overextended=(bb_position is not None and bb_position > bb_limit)))
+                            bb_overextended=(bb_position is not None and bb_position > bb_limit),
+                            atr_over_limit=(atr_pct is not None and atr_pct > atr_limit)))
     return matched, unmatched
 
 
 def filter_recorded_entries(rows, block_negative_momentum=False, block_bb_overextended=False,
+                            block_atr_over_limit=False,
                             cooldown_seconds=10800, loss_streak_count=0,
                             loss_streak_cooldown_seconds=0,
                             loss_ticker_cooldown_seconds=0):
@@ -106,6 +113,8 @@ def filter_recorded_entries(rows, block_negative_momentum=False, block_bb_overex
                 reasons[index] = "negative_hour_momentum"
             elif block_bb_overextended and row.get("bb_overextended"):
                 reasons[index] = "bb_overextended"
+            elif block_atr_over_limit and row.get("atr_over_limit"):
+                reasons[index] = "atr_over_limit"
             else:
                 accepted.add(index)
         elif index in accepted:
@@ -154,6 +163,7 @@ def make_review(history, log_text, since):
             "Cooldown starts from the selected sample's observed losses; earlier open positions are not replayed.",
             "The ticker-loss gate fixes actual fills and cannot model replacement entries while a loser is blocked.",
             "The Bollinger gate only evaluates sells with recorded entry context; older rows remain selected.",
+            "The ATR gate only evaluates sells with recorded entry context; older rows remain selected.",
         ],
     }
     if ambiguous_entries:
@@ -162,6 +172,7 @@ def make_review(history, log_text, since):
         baseline, _ = filter_recorded_entries(matched)
         candidate, _ = filter_recorded_entries(matched, block_negative_momentum=True)
         bb_gate, _ = filter_recorded_entries(matched, block_bb_overextended=True)
+        atr_gate, _ = filter_recorded_entries(matched, block_atr_over_limit=True)
         streak_gate, _ = filter_recorded_entries(
             matched,
             loss_streak_count=LOSS_STREAK_COUNT,
@@ -174,6 +185,7 @@ def make_review(history, log_text, since):
         combined, _ = filter_recorded_entries(
             matched,
             block_bb_overextended=True,
+            block_atr_over_limit=True,
             loss_streak_count=LOSS_STREAK_COUNT,
             loss_streak_cooldown_seconds=LOSS_STREAK_COOLDOWN_SECONDS,
             loss_ticker_cooldown_seconds=LOSS_TICKER_COOLDOWN_SECONDS,
@@ -182,6 +194,7 @@ def make_review(history, log_text, since):
             "current_loss_cooldown": summarize(baseline),
             "with_negative_momentum_gate": summarize(candidate),
             "with_bb_position_gate": summarize(bb_gate),
+            "with_atr_gate": summarize(atr_gate),
             "with_three_loss_streak_cooldown": summarize(streak_gate),
             "with_loss_ticker_cooldown": summarize(ticker_loss_gate),
             "with_all_safeguards": summarize(combined),

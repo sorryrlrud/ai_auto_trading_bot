@@ -61,6 +61,20 @@ class TestStrategyReview(unittest.TestCase):
         self.assertEqual([row["ticker"] for row in candidate], ["KRW-A", "KRW-B"])
         self.assertEqual(reasons[2], "loss_ticker_cooldown")
 
+    def test_atr_gate_blocks_only_entries_above_limit(self):
+        rows = [dict(entry_ts=1, exit_ts=2, profit_krw=-10, negative_hour_momentum=False,
+                     atr_over_limit=True),
+                dict(entry_ts=13, exit_ts=14, profit_krw=20, negative_hour_momentum=False,
+                     atr_over_limit=False)]
+        candidate, reasons = review.filter_recorded_entries(
+            rows,
+            block_atr_over_limit=True,
+            cooldown_seconds=10,
+        )
+
+        self.assertEqual([row["entry_ts"] for row in candidate], [13])
+        self.assertEqual(reasons[0], "atr_over_limit")
+
     def test_partial_exits_are_not_treated_as_independent_entries(self):
         history = [dict(side="SELL", ticker="KRW-A", profit_krw=-10, fee_krw=1,
                         executed_at=f"2026-09-01T{hour}:00:00+09:00") for hour in ("12", "13")]
