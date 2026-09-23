@@ -322,6 +322,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - Automatic dashboard commit `f00ac45` was generated and pushed. The public GitHub Pages payload showed the 06:13:18 decision and the new strategy version; bot-user GitHub SSH access returned the same commit.
 - No verification order was submitted. The new safeguards only restrict entries; their forward performance remains unproven. See `STRATEGY_REVIEW_2026-09-21.md` for the fixed-exit diagnostics and limitations.
 
+## Deployment verified on 2026-09-24
+
+- Source revision: `463d659` (`2026-09-24-atr-volatility-gate`). Local and isolated VM tests each passed 82 tests. The VM backup is `/home/sorryrlrud/bot-backup-20260924-2AZHTZ`; no dependency or image rebuild was needed.
+- Container started at 06:15:48 KST with restart count 0 and OOM false. Local/VM `autotrade.py` SHA-256: `164906be52c422aa12e1cf5b547db80b3f1b5fcbf8f533818ef7906fd515ceb5`.
+- The first real cycle completed at 06:17:19 KST. Its private observation recorded strategy version `2026-09-24-atr-volatility-gate` and `max_atr_pct=6.0`; consecutive failures, risk-check failures and pending orders remained zero.
+- Automatic dashboard commit `a9d2a95` was generated and pushed. The public GitHub Pages payload showed the 06:17:19 decision and new strategy version, and bot-user GitHub SSH access returned the same commit.
+- No verification order was submitted. The bot held only KRW and the existing 12-hour loss-streak pause remained active; the tighter ATR gate only restricts future entries. See `STRATEGY_REVIEW_2026-09-24.md` for the realized-trade and observation diagnostics.
+
 ## Security notes
 
 - Do not place secrets, API keys, private key contents, or `.env` values in this file.
