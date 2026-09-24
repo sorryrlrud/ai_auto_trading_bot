@@ -274,8 +274,11 @@ class TestTradingLogic(unittest.TestCase):
         }
 
         with mock.patch.object(autotrade, "TRADE_ENABLED", True), mock.patch.object(
-            autotrade, "save_bot_state"
-        ), mock.patch.object(autotrade.time, "sleep"):
+            autotrade, "load_recent_performance",
+            return_value={"last_loss_ts": None, "consecutive_losses": 0},
+        ), mock.patch.object(autotrade, "save_bot_state"), mock.patch.object(
+            autotrade.time, "sleep"
+        ):
             autotrade.execute_rebalance_plan(upbit, plan, state)
 
         entry = state["trades"]["KRW-ETH"]
