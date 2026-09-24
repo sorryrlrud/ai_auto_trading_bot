@@ -29,3 +29,4 @@
 - Keep the live trading rules unchanged. Adding a BTC-RSI or 6-hour-momentum gate from only the two new losses would be overfitting, and the current loss-streak pause is already preventing immediate re-entry.
 - Reassess after more ATR-compliant completed trades accumulate. Compare post-gate realized results separately and continue tracking the forward returns of rejected opportunities.
 - Isolate the buy-execution unit test from production `trade_history.json`. The test previously inherited the live loss cooldown and failed on the VM even though it uses a fake Upbit client; mocking recent performance makes the test deterministic without changing runtime behavior.
+- Run future VM unit tests from a temporary source copy so the test logger cannot append synthetic trades to the production `trading.log`.

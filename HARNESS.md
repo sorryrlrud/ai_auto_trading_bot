@@ -128,6 +128,21 @@ for item in data.get("recent_decisions", []):
 PY
 ```
 
+Run unit tests from an isolated temporary copy inside the container. Importing
+`autotrade.py` configures a file logger in the current directory, so running the
+suite from `/app` would append synthetic test messages to the production
+`trading.log`:
+
+```bash
+docker exec --user 1001:1002 --env HOME=/tmp/bot-home quant-ai-bot sh -lc '
+  test_dir=$(mktemp -d /tmp/bot-tests.XXXXXX)
+  trap '\''rm -rf -- "$test_dir"'\'' EXIT
+  cp /app/*.py "$test_dir"/
+  cd "$test_dir"
+  python -m unittest test_logic.py
+'
+```
+
 ## What happened on 2026-05-18
 
 ### Initial mistakes and findings
