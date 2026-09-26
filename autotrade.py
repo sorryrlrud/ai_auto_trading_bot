@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-STRATEGY_VERSION = "2026-09-24-atr-volatility-gate"
+STRATEGY_VERSION = "2026-09-27-atr-five-percent-gate"
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
@@ -52,7 +52,7 @@ LOSS_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_COOLDOWN_SECONDS", "10800")))
 LOSS_STREAK_COUNT = max(0, int(os.getenv("LOSS_STREAK_COUNT", "3")))
 LOSS_STREAK_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_STREAK_COOLDOWN_SECONDS", "43200")))
 CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20"))
-MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "6.0"))
+MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "5.0"))
 MAX_ENTRY_BB_POSITION = float(os.getenv("MAX_ENTRY_BB_POSITION", "1.05"))
 MIN_ENTRY_CHANGE_1H_PCT = float(os.getenv("MIN_ENTRY_CHANGE_1H_PCT", "-1.0"))
 ALLOW_DEFENSIVE_BUYS = os.getenv("ALLOW_DEFENSIVE_BUYS", "false").lower() == "true"

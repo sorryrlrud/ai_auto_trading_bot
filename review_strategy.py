@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 KST = timezone(timedelta(hours=9))
-MAX_ENTRY_ATR_PCT = 6.0
+MAX_ENTRY_ATR_PCT = 5.0
 MAX_ENTRY_BB_POSITION = 1.05
 LOSS_STREAK_COUNT = 3
 LOSS_STREAK_COOLDOWN_SECONDS = 43200

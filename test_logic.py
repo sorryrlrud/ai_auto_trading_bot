@@ -786,7 +786,7 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(plan["entry_block_reason"], "BTC 방어장세에서는 신규 매수 차단")
 
     def test_high_atr_candidate_is_hard_blocked(self):
-        volatile = sample_market_row("KRW-VOLATILE", atr_pct=6.1)
+        volatile = sample_market_row("KRW-VOLATILE", atr_pct=5.1)
         plan = autotrade.build_rebalance_plan(
             market_data=[volatile],
             market_context={"risk_mode": "normal", "market_volatility": "normal"},
@@ -797,7 +797,7 @@ class TestTradingLogic(unittest.TestCase):
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
 
     def test_atr_candidate_at_limit_can_be_bought(self):
-        candidate = sample_market_row("KRW-AT-LIMIT", atr_pct=6.0)
+        candidate = sample_market_row("KRW-AT-LIMIT", atr_pct=5.0)
         plan = autotrade.build_rebalance_plan(
             market_data=[candidate],
             market_context={"risk_mode": "normal", "market_volatility": "normal"},
