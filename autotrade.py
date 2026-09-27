@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-STRATEGY_VERSION = "2026-09-27-atr-five-percent-gate"
+STRATEGY_VERSION = "2026-09-28-six-hour-momentum-gate"
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
@@ -55,6 +55,7 @@ CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20")
 MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "5.0"))
 MAX_ENTRY_BB_POSITION = float(os.getenv("MAX_ENTRY_BB_POSITION", "1.05"))
 MIN_ENTRY_CHANGE_1H_PCT = float(os.getenv("MIN_ENTRY_CHANGE_1H_PCT", "-1.0"))
+MIN_ENTRY_CHANGE_6H_PCT = float(os.getenv("MIN_ENTRY_CHANGE_6H_PCT", "0.5"))
 ALLOW_DEFENSIVE_BUYS = os.getenv("ALLOW_DEFENSIVE_BUYS", "false").lower() == "true"
 EXCLUDED_ENTRY_TICKERS = {
     ticker.strip()
@@ -173,11 +174,14 @@ def setup_api():
     upbit = pyupbit.Upbit(access, secret)
     logger.info("Running rule-based mode. No LLM or Google API is used.")
     logger.info(
-        "Strategy version=%s min_entry_change_1h_pct=%s max_entry_bb_position=%s "
+        "Strategy version=%s min_entry_change_1h_pct=%s min_entry_change_6h_pct=%s "
+        "max_entry_atr_pct=%s max_entry_bb_position=%s "
         "trade_cooldown_seconds=%s loss_ticker_cooldown_seconds=%s "
         "loss_cooldown_seconds=%s loss_streak=%s/%ss",
         STRATEGY_VERSION,
         MIN_ENTRY_CHANGE_1H_PCT,
+        MIN_ENTRY_CHANGE_6H_PCT,
+        MAX_ENTRY_ATR_PCT,
         MAX_ENTRY_BB_POSITION,
         TRADE_COOLDOWN_SECONDS,
         LOSS_TICKER_COOLDOWN_SECONDS,
@@ -423,6 +427,7 @@ def append_strategy_observation(plan, market_data, market_context, holdings, rec
         "recent_performance": recent_performance,
         "plan": _decision_snapshot_payload(plan),
         "entry_rules": {"min_change_1h_pct": MIN_ENTRY_CHANGE_1H_PCT,
+                        "min_change_6h_pct": MIN_ENTRY_CHANGE_6H_PCT,
                         "max_atr_pct": MAX_ENTRY_ATR_PCT,
                         "max_bb_position": MAX_ENTRY_BB_POSITION,
                         "trade_cooldown_seconds": TRADE_COOLDOWN_SECONDS,
@@ -826,6 +831,8 @@ def entry_block_reason(data, market_context):
         return f"볼린저밴드 과열({daily['bb_position']} > {MAX_ENTRY_BB_POSITION})"
     if data["price_change_1h"] < MIN_ENTRY_CHANGE_1H_PCT:
         return f"1시간 하락 모멘텀({data['price_change_1h']}% < {MIN_ENTRY_CHANGE_1H_PCT}%)"
+    if data["price_change_6h"] < MIN_ENTRY_CHANGE_6H_PCT:
+        return f"6시간 모멘텀 부족({data['price_change_6h']}% < {MIN_ENTRY_CHANGE_6H_PCT}%)"
     if not daily["ma20_over_60"]:
         return "일봉 장기 추세 미정렬(MA20<=MA60)"
     if not daily["price_over_ma20"]:
@@ -1133,6 +1140,7 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
                 "score": candidate["score"],
                 "buy_threshold": threshold,
                 "min_entry_change_1h_pct": MIN_ENTRY_CHANGE_1H_PCT,
+                "min_entry_change_6h_pct": MIN_ENTRY_CHANGE_6H_PCT,
                 "max_entry_atr_pct": MAX_ENTRY_ATR_PCT,
                 "max_entry_bb_position": MAX_ENTRY_BB_POSITION,
                 "loss_ticker_cooldown_seconds": LOSS_TICKER_COOLDOWN_SECONDS,

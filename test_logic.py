@@ -865,12 +865,27 @@ class TestTradingLogic(unittest.TestCase):
         self.assertFalse(plan["entry_contexts"])
         self.assertIn("1시간 하락 모멘텀", plan["entry_rejections"][0]["reason"])
 
+    def test_high_score_cannot_override_weak_six_hour_momentum(self):
+        row = sample_market_row("KRW-WEAK-SIX-HOUR", price_change_6h=0.49)
+        context = {"risk_mode": "normal", "market_volatility": "normal"}
+        score, _ = autotrade.score_coin(row, context)
+        self.assertGreater(score, autotrade.BASE_BUY_SCORE)
+        plan = autotrade.build_rebalance_plan(
+            [row], context, 100000, [],
+            {"count": 0, "avg_profit": 0, "loss_rate": 0}, now_ts=10000,
+        )
+        self.assertEqual(plan["buy_budget_krw"], 0)
+        self.assertFalse(plan["entry_contexts"])
+        self.assertIn("6시간 모멘텀 부족", plan["entry_rejections"][0]["reason"])
+
     def test_momentum_gate_boundary_and_hold_management(self):
-        with mock.patch.object(autotrade, "MIN_ENTRY_CHANGE_1H_PCT", -1.0):
+        with mock.patch.object(autotrade, "MIN_ENTRY_CHANGE_1H_PCT", -1.0), \
+                mock.patch.object(autotrade, "MIN_ENTRY_CHANGE_6H_PCT", 0.5):
             self.assertIsNone(autotrade.entry_block_reason(
                 sample_market_row(price_change_1h=-1.0), {"risk_mode": "normal"}))
             self.assertIsNone(autotrade.entry_block_reason(
-                sample_market_row(price_change_1h=0.2), {"risk_mode": "normal"}))
+                sample_market_row(price_change_1h=0.2, price_change_6h=0.5),
+                {"risk_mode": "normal"}))
             weak = sample_market_row(price_change_1h=-1.1)
             holding = {"ticker": "KRW-ETH", "profit_pct": 0}
             sell, _ = autotrade.should_sell_holding(holding, {"KRW-ETH": weak},
@@ -886,6 +901,10 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(
             plan["entry_contexts"]["KRW-ETH"]["max_entry_atr_pct"],
             autotrade.MAX_ENTRY_ATR_PCT,
+        )
+        self.assertEqual(
+            plan["entry_contexts"]["KRW-ETH"]["min_entry_change_6h_pct"],
+            autotrade.MIN_ENTRY_CHANGE_6H_PCT,
         )
         payload = autotrade._decision_snapshot_payload(plan)
         self.assertEqual(payload["strategy_version"], autotrade.STRATEGY_VERSION)

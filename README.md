@@ -38,6 +38,8 @@ The rule engine keeps at least the market- and performance-dependent cash reserv
 
 New entries also require the completed-candle one-hour return to be at least `MIN_ENTRY_CHANGE_1H_PCT` (default `-1.0%`). Previously this weakness only reduced the score and a high aggregate score could still buy it. This is an entry rule; it does not force an exit from an existing position. The September 9 review did not establish an incremental net-profit improvement over the corrected two-hour cooldown. See [the review](STRATEGY_REVIEW_2026-09-09.md) for the measured tradeoffs.
 
+New entries require the completed-candle six-hour return to be at least `MIN_ENTRY_CHANGE_6H_PCT` (default `0.5%`). This entry-only momentum confirmation was added after the September 28 review found that the lower-momentum realized sample and independently deduplicated observation sample both underperformed. Existing positions continue to use the same holding and exit rules; see [the review](STRATEGY_REVIEW_2026-09-28.md).
+
 New entries are also blocked when the daily Bollinger position exceeds `MAX_ENTRY_BB_POSITION` (default `1.05`). The same level was already treated as an overheated exit signal; applying it before entry prevents buying a candidate that the exit logic already considers extended.
 
 New entries are blocked when completed-candle ATR exceeds `MAX_ENTRY_ATR_PCT` (default `5.0%`). This volatility gate only affects entries; existing positions still receive the same 60-second hard-stop checks and ordinary exit handling. The September 27 review tightened the ceiling after the completed 5–6% ATR sample underperformed lower-volatility entries; see [the review](STRATEGY_REVIEW_2026-09-27.md).
