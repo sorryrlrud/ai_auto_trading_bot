@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-09-27 KST
+Last verified: 2026-09-28 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -353,6 +353,15 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - The first real cycle completed at 06:09:10 KST. Its private observation recorded strategy version `2026-09-27-atr-five-percent-gate` and `max_atr_pct=5.0`; consecutive failures, risk-check failures and pending orders remained zero.
 - The latest three realized results were losses, so the existing twelve-hour loss-streak pause correctly blocked new entries. The account held KRW only and no verification order was submitted.
 - Automatic dashboard commit `9c9f03e` was generated and pushed. Local, VM and remote source history all contain the deployment commit. See `STRATEGY_REVIEW_2026-09-27.md` for the realized-trade and observation evidence behind the 5% ceiling.
+
+## Deployment verified on 2026-09-28
+
+- Source revision: `3bc300d` (`2026-09-28-six-hour-momentum-gate`). Local and isolated VM tests each passed 83 tests. The VM backup is `/home/sorryrlrud/bot-backup-20260928-OMKWvP`; no dependency or image rebuild was needed.
+- Container started at 06:11:36 KST with restart count 0 and OOM false. Startup logged `min_entry_change_6h_pct=0.5`, `max_entry_atr_pct=5.0`, and the existing loss/cooldown settings.
+- The first real cycle completed at 06:13:03 KST. Its private observation recorded strategy version `2026-09-28-six-hour-momentum-gate` and `min_change_6h_pct=0.5`; consecutive failures, risk-check failures, and pending orders remained zero.
+- The account retained its existing BTC position, which remained on HOLD. The latest four realized results were losses, so the existing twelve-hour loss-streak pause continued to block new entries; no verification order was submitted.
+- Automatic dashboard commit `2dfdb4b` was generated and pushed. The dashboard payload showed the 06:13:03 successful cycle, three recent decisions, and the new strategy version. Bot-user GitHub SSH access returned the same remote revision.
+- See `STRATEGY_REVIEW_2026-09-28.md` for the realized-trade and deduplicated opportunity evidence behind the six-hour momentum floor.
 
 ## Security notes
 
