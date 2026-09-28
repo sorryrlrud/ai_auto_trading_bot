@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-09-28 KST
+Last verified: 2026-09-29 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
