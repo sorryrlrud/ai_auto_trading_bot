@@ -50,6 +50,8 @@ When the latest realized results contain at least `LOSS_STREAK_COUNT` consecutiv
 
 The existing hard stop (`STOP_LOSS_PCT`, default `-2.2%` before fees) is checked every `RISK_CHECK_SECONDS` (default `60`) between rebalance cycles and during market scans. Entry and indicator-based exit decisions still follow the 15-minute cycle. Checks run in the same process, so API calls and dashboard publishing can delay them; a market stop does not guarantee the threshold price. Dashboard subprocesses have bounded timeouts. Holdings are refreshed after each market scan before the rebalance plan is built.
 
+The monitor also persists each position's observed peak price. Once the position reaches `PROFIT_PROTECT_PCT` (default `1.2%` before fees), profit protection stays armed through subsequent retracements and restarts. A completed 15-minute trend break then exits even if current profit has fallen below 1.2%; an intact trend alone never triggers this new exit. The existing early profit-protection priority over the one-hour minimum hold is retained. Partial sells retain the peak; full exits and new entries clear it. An average-cost change resets the peak to avoid applying another position's history. Net return in the new exit reason uses the recorded buy fee and `ESTIMATED_FEE_RATE` (default `0.0005`) for the estimated sell fee; realized PnL still comes only from actual fills. See [the September 30 cycle review](STRATEGY_REVIEW_2026-09-30_CYCLE.md), including the rejected price-only trailing rule.
+
 When a sell realizes a loss, the global entry cooldown is re-checked before any replacement buy from the same rebalance plan. This prevents an immediate cross-ticker rotation from bypassing `LOSS_COOLDOWN_SECONDS`.
 
 Accepted orders are saved under `pending_orders` in `bot_state.json` and checked for terminal `done` or `cancel` status with matching execution details. Pending orders are reconciled after restart and prevent replacement buys. Realized PnL uses actual fills only, retains the remaining buy fee after a partial sell, and deduplicates history by order UUID. State and trade history writes are atomic. A submission that fails before returning an order UUID still requires checking the exchange; the pending-order recovery covers acknowledged orders.
@@ -71,8 +73,17 @@ Use an SSH copy of the VM runtime files for an offline review:
 
 The report separates actual realized PnL from entry-selection diagnostics. Those diagnostics keep historical quantities and exits fixed, cannot simulate alternative opportunities or capital reuse, and are not account returns or a portfolio backtest. Test messages in the log are not counted as actual trades. Multiple partial exits matched to one entry disable the selection simulation.
 
+Compare persistent profit protection with the recorded exits using private VM copies:
+
+```bash
+./venv/bin/python review_exit_paths.py --history /tmp/vm-snapshot/trade_history.json \
+  --observations /tmp/vm-snapshot/strategy_observations.jsonl* --output /tmp/exit-review.json
+```
+
+This diagnostic excludes ambiguous partial positions and missing entry paths, uses observed prices with fees and an adverse 0.1% fill assumption, and preserves actual fills when the original rule already exits at the same snapshot. Its 15-minute samples cannot reconstruct 60-second peak tracking or capital reuse. `--mode price_trail` reproduces the rejected price-only alternative; it is not the deployed algorithm.
+
 ## Local test
 
 ```bash
-./venv/bin/python -m unittest test_logic.py test_execution.py test_strategy_review.py
+./venv/bin/python -m unittest test_logic.py test_execution.py test_strategy_review.py test_profit_protection.py
 ```

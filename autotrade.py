@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-STRATEGY_VERSION = "2026-09-28-six-hour-momentum-gate"
+STRATEGY_VERSION = "2026-09-30-profit-protection-memory"
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
@@ -41,6 +41,9 @@ MAX_SINGLE_POSITION_PCT = float(os.getenv("MAX_SINGLE_POSITION_PCT", "25.0"))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-2.2"))
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "3.2"))
 PROFIT_PROTECT_PCT = float(os.getenv("PROFIT_PROTECT_PCT", "1.2"))
+ESTIMATED_FEE_RATE = float(os.getenv("ESTIMATED_FEE_RATE", "0.0005"))
+if not (PROFIT_PROTECT_PCT > 0 and 0 <= ESTIMATED_FEE_RATE < 0.01):
+    raise ValueError("Invalid profit protection or estimated fee configuration")
 BASE_BUY_SCORE = float(os.getenv("BASE_BUY_SCORE", "10.0"))
 MIN_HOLD_SECONDS = int(os.getenv("MIN_HOLD_SECONDS", "3600"))
 TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "21600"))
@@ -76,6 +79,7 @@ OBSERVATION_MAX_BYTES = 10 * 1024 * 1024
 OBSERVATION_BACKUP_COUNT = 3
 ENTRY_STATE_FIELDS = ("entry_volume", "entry_funds_krw", "entry_fee_krw")
 ENTRY_CONTEXT_FIELDS = ("entry_order_uuid", "entry_context")
+PROFIT_PEAK_FIELDS = ("peak_price", "peak_avg_buy_price")
 
 _ORIGINAL_REQUESTS_METHODS = {name: getattr(requests, name) for name in ("get", "post", "delete")}
 
@@ -189,6 +193,10 @@ def setup_api():
         LOSS_STREAK_COUNT,
         LOSS_STREAK_COOLDOWN_SECONDS,
     )
+    logger.info("Profit protection memory: arm_gross_pct=%s require_15m_trend_break=true "
+                "estimated_fee_rate=%s peak_sample_seconds=%s",
+                PROFIT_PROTECT_PCT,
+                ESTIMATED_FEE_RATE, RISK_CHECK_SECONDS)
     return upbit
 
 
@@ -435,6 +443,11 @@ def append_strategy_observation(plan, market_data, market_context, holdings, rec
                         "loss_cooldown_seconds": LOSS_COOLDOWN_SECONDS,
                         "loss_streak_count": LOSS_STREAK_COUNT,
                         "loss_streak_cooldown_seconds": LOSS_STREAK_COOLDOWN_SECONDS},
+        "exit_rules": {"stop_loss_pct": STOP_LOSS_PCT,
+                       "profit_protect_arm_gross_pct": PROFIT_PROTECT_PCT,
+                       "profit_protect_requires_15m_trend_break": True,
+                       "estimated_fee_rate": ESTIMATED_FEE_RATE,
+                       "risk_check_seconds": RISK_CHECK_SECONDS},
     }
     try:
         # Serialize before rotating, so invalid input cannot displace a good file.
@@ -534,6 +547,9 @@ def build_sell_history_record(decision, order=None, entry_state=None):
             record[field] = entry_state[field]
     if entry_state.get("last_buy_ts"):
         record["entry_submitted_at"] = _iso_now(datetime.fromtimestamp(entry_state["last_buy_ts"]))
+    for field in PROFIT_PEAK_FIELDS:
+        if field in entry_state:
+            record[field] = entry_state[field]
     return record
 
 
@@ -995,6 +1011,45 @@ def is_loss_cooldown(recent_performance, now_ts):
     )
 
 
+def update_profit_peaks(holdings, state):
+    """Remember observed prices only; never infer an intrabar high before entry."""
+    changed = False
+    for holding in holdings:
+        price = finite_float(holding.get("current_price"))
+        basis = finite_float(holding.get("avg_buy_price"))
+        if price <= 0 or basis <= 0:
+            continue
+        trade = state.setdefault("trades", {}).setdefault(holding["ticker"], {})
+        same_basis = math.isclose(finite_float(trade.get("peak_avg_buy_price")), basis, rel_tol=1e-8)
+        peak = finite_float(trade.get("peak_price")) if same_basis else 0
+        if not same_basis or price > peak:
+            trade.update(peak_price=max(peak, price), peak_avg_buy_price=basis)
+            changed = True
+    return changed
+
+
+def estimated_net_profit_pct(price, avg_buy_price, trade):
+    """Estimated liquidation return; realized history still uses actual fills/fees."""
+    if price <= 0 or avg_buy_price <= 0:
+        raise ValueError("Positive prices required for a net return estimate")
+    entry_volume = finite_float(trade.get("entry_volume"))
+    fee_per_coin = (finite_float(trade["entry_fee_krw"]) / entry_volume
+                    if entry_volume > 0 and "entry_fee_krw" in trade
+                    else avg_buy_price * ESTIMATED_FEE_RATE)
+    return (price * (1 - ESTIMATED_FEE_RATE) / (avg_buy_price + fee_per_coin) - 1) * 100
+
+
+def profit_protection_armed(holding, state):
+    """Keep profit protection armed through retracements, for this entry only."""
+    trade = state.get("trades", {}).get(holding["ticker"], {})
+    basis = finite_float(holding.get("avg_buy_price"))
+    peak = finite_float(trade.get("peak_price"))
+    if (basis <= 0 or peak <= 0
+            or not math.isclose(finite_float(trade.get("peak_avg_buy_price")), basis, rel_tol=1e-8)):
+        return False
+    return peak >= basis * (1 + PROFIT_PROTECT_PCT / 100)
+
+
 def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
     ticker = holding["ticker"]
     profit_pct = holding["profit_pct"]
@@ -1022,6 +1077,10 @@ def should_sell_holding(holding, data_by_ticker, market_context, state, now_ts):
         return True, f"수익 {profit_pct}% 및 과열 신호로 익절"
     if profit_pct >= PROFIT_PROTECT_PCT and short_broken:
         return True, f"수익 {profit_pct}% 보호: 15분 추세 훼손"
+    if profit_protection_armed(holding, state) and short_broken:
+        trade = state["trades"][ticker]
+        net = estimated_net_profit_pct(holding["current_price"], holding["avg_buy_price"], trade)
+        return True, f"고점 수익 보호: {PROFIT_PROTECT_PCT}% 도달 후 15분 추세 훼손 (현재 추정 순수익 {net:.2f}%)"
     if age is not None and age < MIN_HOLD_SECONDS and profit_pct > STOP_LOSS_PCT:
         return False, f"최소 보유시간 유지({int(age)}초/{MIN_HOLD_SECONDS}초)"
     if profit_pct < -0.7 and short_broken and hour_broken:
@@ -1195,6 +1254,9 @@ def reconcile_pending_orders(upbit, state):
             trade_state = dict(pending["entry_state"])
             if decision["decision"] == "BUY":
                 trade_state.update(build_buy_state_record(order))
+                # A new position cannot inherit an earlier position's high-water mark.
+                for field in PROFIT_PEAK_FIELDS:
+                    trade_state.pop(field, None)
                 trade_state["last_buy_ts"] = pending["submitted_at"]
                 trade_state["entry_order_uuid"] = order_uuid
                 # A new entry must never inherit the previous position's signal.
@@ -1215,7 +1277,7 @@ def reconcile_pending_orders(upbit, state):
                     else:
                         trade_state.pop(field, None)
                 if remaining_ratio <= 1e-7:
-                    for field in ENTRY_CONTEXT_FIELDS:
+                    for field in ENTRY_CONTEXT_FIELDS + PROFIT_PEAK_FIELDS:
                         trade_state.pop(field, None)
                 logger.info("[REALIZED] %s profit=%s KRW (%s%%)", ticker, record["profit_krw"], record["profit_pct"])
             state["trades"][ticker] = trade_state
@@ -1329,7 +1391,7 @@ def execute_rebalance_plan(upbit, plan, state=None):
 
 
 class RiskMonitor:
-    """Check the existing hard stop between candle scans, without creating entries."""
+    """Check hard stops and record profit peaks; trend exits remain on candle cycles."""
 
     def __init__(self, upbit):
         self.upbit = upbit
@@ -1343,6 +1405,8 @@ class RiskMonitor:
             state = load_bot_state()
             changed = reconcile_pending_orders(self.upbit, state) if TRADE_ENABLED else False
             holdings = get_current_holdings(self.upbit)
+            if update_profit_peaks(holdings, state) and TRADE_ENABLED:
+                save_bot_state(state)
             decisions = []
             for holding in holdings:
                 if holding["profit_pct"] <= STOP_LOSS_PCT:
@@ -1417,6 +1481,8 @@ def main():
             # state because the risk monitor may have exited during the scan.
             current_holdings = get_current_holdings(upbit)
             state = load_bot_state()
+            if update_profit_peaks(current_holdings, state) and TRADE_ENABLED:
+                save_bot_state(state)
             recent_performance = load_recent_performance()
             krw_balance = upbit.get_balance("KRW")
             plan = build_rebalance_plan(
