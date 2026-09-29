@@ -364,6 +364,13 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - Automatic dashboard commit `2dfdb4b` was generated and pushed. The dashboard payload showed the 06:13:03 successful cycle, three recent decisions, and the new strategy version. Bot-user GitHub SSH access returned the same remote revision.
 - See `STRATEGY_REVIEW_2026-09-28.md` for the realized-trade and deduplicated opportunity evidence behind the six-hour momentum floor.
 
+## Deployment verified on 2026-09-30
+
+- Source revision: `9583eb6` (`2026-09-30-profit-protection-memory`). Local and isolated VM suites each passed 103 tests with socket connections blocked. The VM backup is `/home/sorryrlrud/bot-backup-20260930-0G3DdA`; source and runtime history were preserved. No image rebuild or dependency change was needed.
+- Container started at 07:05:33 KST with zero restarts and no OOM. Local/VM `autotrade.py` SHA-256: `cc192079f7fc8346321360155ec85efcd9cc588d919e1ce1aee406968bb54538`. Startup confirmed the 1.2% gross profit-memory threshold, required 15-minute trend break, and 60-second peak sampling.
+- The first real cycle completed at 07:07:01 KST and dashboard refresh completed at 07:07:04. Consecutive failures, risk failures and pending orders remained zero. The bot held no coin position; no candidate passed the unchanged entry filters and no verification order was submitted.
+- Automatic dashboard commit `642f3a8` followed the first cycle. See `STRATEGY_REVIEW_2026-09-30_CYCLE.md` for the retrospective diagnostic, rejected price-only trail, and performance limitations.
+
 ## Security notes
 
 - Do not place secrets, API keys, private key contents, or `.env` values in this file.

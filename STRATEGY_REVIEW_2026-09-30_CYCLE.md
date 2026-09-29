@@ -27,6 +27,8 @@ No new entry threshold, position size, cooldown, stop-loss level, or cycle durat
 
 The selected rule changes seven historical exits, all losses, and leaves the nine winners' observed exits unchanged. It reduces losses in this diagnostic; **it does not establish an improved win rate, positive overall expectancy, or maximum profit**. Of the nine current-gate historical entries, only ETH's exit changes. That incremental evidence is particularly small.
 
+With adverse execution allowances of 0%, 0.1%, and 0.3%, the selected rule's all-path diagnostic is respectively -KRW 3,340.83, -KRW 3,442.79, and -KRW 3,646.74. These are sensitivity checks, not measured fills.
+
 The current-gate subset was obtained by applying `entry_block_reason` to each trade's recorded entry signal/market context and requiring the recorded score to meet its recorded buy threshold. It does not replay portfolio cooldowns or alternate capital allocation.
 
 ## Rejected alternative
@@ -37,4 +39,11 @@ A price-only trail, armed at the same 1.2% gross gain and exiting at half the hi
 
 This is a retrospective fixed-entry diagnostic, not a portfolio backtest or an untouched holdout. Changed exit times alter cooldowns, replacement entries and cash reuse in live operation. Fifteen-minute snapshots cannot reproduce the new monitor's 60-second observed peaks, intraperiod price gaps or actual execution. The chronological split is descriptive; both periods were available during review. All-history loss reductions do not prove incremental performance for the current entry filters.
 
-The local suite passed 103 tests covering both earlier safeguards and profit-memory behavior, trend confirmation, gap losses, restarts, partial fills, new entries, actual fee accounting, dry-run isolation and diagnostic lookahead exclusions. Deployment verification is recorded below after the VM rollout.
+Local and isolated VM suites each passed 103 tests, with socket connections blocked. Tests cover both earlier safeguards and profit-memory behavior, trend confirmation, gap losses, restarts, partial fills, new entries, actual fee accounting, dry-run isolation and diagnostic lookahead exclusions. VM tests ran from a temporary source copy, preserving production runtime files. Deployment verification is recorded below after the VM rollout.
+
+## Deployment
+
+- Source commit: `9583eb6`; backup: `/home/sorryrlrud/bot-backup-20260930-0G3DdA`.
+- Container restarted at 07:05:33 KST without rebuilding the image or changing dependencies. Local and VM source hashes match (`cc192079f7fc8346321360155ec85efcd9cc588d919e1ce1aee406968bb54538`). Startup logs confirm the intended strategy version and settings.
+- First real cycle succeeded at 07:07:01 KST; dashboard refresh finished at 07:07:04 and created commit `642f3a8`. Risk checks, cycle failures and pending orders remained at zero. No coin position or eligible entry was present, so verification submitted no trade.
+- The rollout establishes operating correctness, not realized profit improvement. Evaluate future results by entry/exit strategy versions and persistent peaks before any further threshold change.
