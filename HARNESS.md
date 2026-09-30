@@ -372,6 +372,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - The first real cycle completed at 07:07:01 KST and dashboard refresh completed at 07:07:04. Consecutive failures, risk failures and pending orders remained zero. The bot held no coin position; no candidate passed the unchanged entry filters and no verification order was submitted.
 - Automatic dashboard commit `642f3a8` followed the first cycle. See `STRATEGY_REVIEW_2026-09-30_CYCLE.md` for the retrospective diagnostic, rejected price-only trail, and performance limitations.
 
+## Deployment verified on 2026-10-01
+
+- Source revision: `2030511` (`2026-10-01-15m-rsi-overheat-gate`). Local and isolated VM suites each passed 105 tests. The VM backup is `/home/sorryrlrud/bot-backup-20261001-dwYmDO`; no dependency or image rebuild was needed.
+- The container started at 06:10:59 KST with zero restarts and no OOM event. Local, VM and container `autotrade.py` SHA-256 was `67d5f857a082d30ee7f91d95d5767f4792c2fec54edf4ed8d6e2099721b29081`.
+- Startup logged `max_entry_15m_rsi=75.0`. The first risk check had no holdings, stops, or pending orders, and the first real cycle completed at 06:12:17 KST with zero failures.
+- The first private observation recorded the new strategy version and RSI ceiling. The existing twelve-hour loss-streak pause blocked entries, so no verification order was submitted.
+- Automatic dashboard commit `91afa8d` was pushed. The public GitHub Pages payload returned HTTP 200 with the 06:12:17 generation time, new strategy version, and entry-block reason. Bot-user GitHub access and a host-side fast-forward pull both succeeded.
+
 ## Security notes
 
 - Do not place secrets, API keys, private key contents, or `.env` values in this file.

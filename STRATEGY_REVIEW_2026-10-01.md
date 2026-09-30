@@ -39,9 +39,17 @@ The first live use of persistent profit memory exposed its deliberate tradeoff: 
 
 The broader evidence still does not justify replacing trend confirmation. Across 36 comparable paths, the half-peak price trail improved the broad historical diagnostic from -KRW 5,053.11 to -KRW 3,391.16. But among 11 realized entries passing today's numeric gates and recorded score threshold, it reduced fixed-entry net PnL from +KRW 1,063.31 to +KRW 503.63 by cutting several profitable recoveries. The current trend-memory diagnostic was +KRW 1,145.85 on that same subset. Therefore the price-only trail remains rejected; ETH is retained as forward evidence for the next review rather than used to reverse yesterday's deliberately selected exit behavior after one trade.
 
-## Limits and verification plan
+## Limits and verification
 
 - Opportunity returns use observed cycle prices, not executable fills, and do not replay portfolio cash, replacement trades, or changed cooldown paths.
 - The six-hour spacing reduces repeated signals but does not make the sample independent or untouched. All three above-75 cases were visible when selecting the threshold.
 - Fixed-entry exit diagnostics use sparse 15-minute observations and cannot reproduce the live 60-second peak monitor or intraperiod gaps.
-- Local and isolated VM test results, deployment revision, backup path, first live cycle, and dashboard publication are recorded after rollout.
+- Local and isolated VM suites each passed 105 tests. The VM suite ran from a temporary source copy, preserving live runtime files and avoiding synthetic test logs in production.
+
+## Deployment
+
+- Source revision: `2030511`; backup: `/home/sorryrlrud/bot-backup-20261001-dwYmDO`. No dependency or image rebuild was needed. Runtime state and history were preserved.
+- The container started at 06:10:59 KST with zero restarts and no OOM event. Local, VM and container `autotrade.py` SHA-256 was `67d5f857a082d30ee7f91d95d5767f4792c2fec54edf4ed8d6e2099721b29081`.
+- Startup logged strategy `2026-10-01-15m-rsi-overheat-gate` and `max_entry_15m_rsi=75.0`. The first risk check had zero holdings, stops, and pending orders.
+- The first live cycle completed at 06:12:17 KST with zero cycle/risk failures and zero pending orders. Its private observation recorded `max_15m_rsi=75.0`; the existing nine-loss streak correctly blocked new entries for twelve hours, so no verification order was submitted.
+- Automatic dashboard commit `91afa8d` was pushed. The public GitHub Pages endpoint returned HTTP 200 with generation time 06:12:17 KST, the new strategy version, and the loss-streak entry-block reason. Bot-user GitHub access and a host-side fast-forward pull both succeeded.
