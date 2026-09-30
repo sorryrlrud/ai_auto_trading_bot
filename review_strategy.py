@@ -20,6 +20,7 @@ from pathlib import Path
 KST = timezone(timedelta(hours=9))
 MAX_ENTRY_ATR_PCT = 5.0
 MAX_ENTRY_BB_POSITION = 1.05
+MAX_ENTRY_15M_RSI = 75.0
 LOSS_STREAK_COUNT = 3
 LOSS_STREAK_COOLDOWN_SECONDS = 43200
 LOSS_TICKER_COOLDOWN_SECONDS = 43200
@@ -75,16 +76,22 @@ def match_entries(rows, log_text):
         atr_limit = (row.get("entry_context") or {}).get(
             "max_entry_atr_pct", MAX_ENTRY_ATR_PCT
         )
+        minute = (signal.get("indicators") or {}).get("15m") or {}
+        rsi_15m = minute.get("rsi")
+        rsi_15m_limit = (row.get("entry_context") or {}).get(
+            "max_entry_15m_rsi", MAX_ENTRY_15M_RSI
+        )
         matched.append(dict(row, entry_ts=buy["at"], exit_ts=sold_at,
                             # Historical logs expose this exact existing score reason.
                             negative_hour_momentum="1h weak" in buy["reason"],
                             bb_overextended=(bb_position is not None and bb_position > bb_limit),
-                            atr_over_limit=(atr_pct is not None and atr_pct > atr_limit)))
+                            atr_over_limit=(atr_pct is not None and atr_pct > atr_limit),
+                            rsi_15m_over_limit=(rsi_15m is not None and rsi_15m > rsi_15m_limit)))
     return matched, unmatched
 
 
 def filter_recorded_entries(rows, block_negative_momentum=False, block_bb_overextended=False,
-                            block_atr_over_limit=False,
+                            block_atr_over_limit=False, block_rsi_15m_over_limit=False,
                             cooldown_seconds=10800, loss_streak_count=0,
                             loss_streak_cooldown_seconds=0,
                             loss_ticker_cooldown_seconds=0):
@@ -115,6 +122,8 @@ def filter_recorded_entries(rows, block_negative_momentum=False, block_bb_overex
                 reasons[index] = "bb_overextended"
             elif block_atr_over_limit and row.get("atr_over_limit"):
                 reasons[index] = "atr_over_limit"
+            elif block_rsi_15m_over_limit and row.get("rsi_15m_over_limit"):
+                reasons[index] = "rsi_15m_over_limit"
             else:
                 accepted.add(index)
         elif index in accepted:
@@ -164,6 +173,7 @@ def make_review(history, log_text, since):
             "The ticker-loss gate fixes actual fills and cannot model replacement entries while a loser is blocked.",
             "The Bollinger gate only evaluates sells with recorded entry context; older rows remain selected.",
             "The ATR gate only evaluates sells with recorded entry context; older rows remain selected.",
+            "The 15-minute RSI gate only evaluates sells with recorded entry context; older rows remain selected.",
         ],
     }
     if ambiguous_entries:
@@ -173,6 +183,7 @@ def make_review(history, log_text, since):
         candidate, _ = filter_recorded_entries(matched, block_negative_momentum=True)
         bb_gate, _ = filter_recorded_entries(matched, block_bb_overextended=True)
         atr_gate, _ = filter_recorded_entries(matched, block_atr_over_limit=True)
+        rsi_15m_gate, _ = filter_recorded_entries(matched, block_rsi_15m_over_limit=True)
         streak_gate, _ = filter_recorded_entries(
             matched,
             loss_streak_count=LOSS_STREAK_COUNT,
@@ -186,6 +197,7 @@ def make_review(history, log_text, since):
             matched,
             block_bb_overextended=True,
             block_atr_over_limit=True,
+            block_rsi_15m_over_limit=True,
             loss_streak_count=LOSS_STREAK_COUNT,
             loss_streak_cooldown_seconds=LOSS_STREAK_COOLDOWN_SECONDS,
             loss_ticker_cooldown_seconds=LOSS_TICKER_COOLDOWN_SECONDS,
@@ -195,6 +207,7 @@ def make_review(history, log_text, since):
             "with_negative_momentum_gate": summarize(candidate),
             "with_bb_position_gate": summarize(bb_gate),
             "with_atr_gate": summarize(atr_gate),
+            "with_15m_rsi_gate": summarize(rsi_15m_gate),
             "with_three_loss_streak_cooldown": summarize(streak_gate),
             "with_loss_ticker_cooldown": summarize(ticker_loss_gate),
             "with_all_safeguards": summarize(combined),

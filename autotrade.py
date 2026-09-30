@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-STRATEGY_VERSION = "2026-09-30-profit-protection-memory"
+STRATEGY_VERSION = "2026-10-01-15m-rsi-overheat-gate"
 MIN_ORDER_KRW = 5_000
 ORDER_BUFFER = 0.995
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "900"))
@@ -57,6 +57,7 @@ LOSS_STREAK_COOLDOWN_SECONDS = max(0, int(os.getenv("LOSS_STREAK_COOLDOWN_SECOND
 CANDLE_CLOSE_BUFFER_SECONDS = int(os.getenv("CANDLE_CLOSE_BUFFER_SECONDS", "20"))
 MAX_ENTRY_ATR_PCT = float(os.getenv("MAX_ENTRY_ATR_PCT", "5.0"))
 MAX_ENTRY_BB_POSITION = float(os.getenv("MAX_ENTRY_BB_POSITION", "1.05"))
+MAX_ENTRY_15M_RSI = float(os.getenv("MAX_ENTRY_15M_RSI", "75.0"))
 MIN_ENTRY_CHANGE_1H_PCT = float(os.getenv("MIN_ENTRY_CHANGE_1H_PCT", "-1.0"))
 MIN_ENTRY_CHANGE_6H_PCT = float(os.getenv("MIN_ENTRY_CHANGE_6H_PCT", "0.5"))
 ALLOW_DEFENSIVE_BUYS = os.getenv("ALLOW_DEFENSIVE_BUYS", "false").lower() == "true"
@@ -179,7 +180,7 @@ def setup_api():
     logger.info("Running rule-based mode. No LLM or Google API is used.")
     logger.info(
         "Strategy version=%s min_entry_change_1h_pct=%s min_entry_change_6h_pct=%s "
-        "max_entry_atr_pct=%s max_entry_bb_position=%s "
+        "max_entry_atr_pct=%s max_entry_bb_position=%s max_entry_15m_rsi=%s "
         "trade_cooldown_seconds=%s loss_ticker_cooldown_seconds=%s "
         "loss_cooldown_seconds=%s loss_streak=%s/%ss",
         STRATEGY_VERSION,
@@ -187,6 +188,7 @@ def setup_api():
         MIN_ENTRY_CHANGE_6H_PCT,
         MAX_ENTRY_ATR_PCT,
         MAX_ENTRY_BB_POSITION,
+        MAX_ENTRY_15M_RSI,
         TRADE_COOLDOWN_SECONDS,
         LOSS_TICKER_COOLDOWN_SECONDS,
         LOSS_COOLDOWN_SECONDS,
@@ -438,6 +440,7 @@ def append_strategy_observation(plan, market_data, market_context, holdings, rec
                         "min_change_6h_pct": MIN_ENTRY_CHANGE_6H_PCT,
                         "max_atr_pct": MAX_ENTRY_ATR_PCT,
                         "max_bb_position": MAX_ENTRY_BB_POSITION,
+                        "max_15m_rsi": MAX_ENTRY_15M_RSI,
                         "trade_cooldown_seconds": TRADE_COOLDOWN_SECONDS,
                         "loss_ticker_cooldown_seconds": LOSS_TICKER_COOLDOWN_SECONDS,
                         "loss_cooldown_seconds": LOSS_COOLDOWN_SECONDS,
@@ -857,7 +860,7 @@ def entry_block_reason(data, market_context):
         return "1시간 추세 미정렬"
     if not (minute["ma5_over_long"] and minute["price_over_long"] and minute["macd_hist"] > 0):
         return "15분 추세 미정렬"
-    if daily["rsi"] > 72 or hour["rsi"] > 75 or minute["rsi"] > 78:
+    if daily["rsi"] > 72 or hour["rsi"] > 75 or minute["rsi"] > MAX_ENTRY_15M_RSI:
         return "과열 구간"
     if data["volume_ratio"] > 5 or data["price_change_1d"] > 12 or data["price_change_1h"] > 7:
         return "급등 추격 구간"
@@ -925,7 +928,7 @@ def score_coin(data, market_context):
     if 45 <= minute["rsi"] <= 70:
         score += 0.75
         reasons.append("15m RSI ok")
-    elif minute["rsi"] > 78:
+    elif minute["rsi"] > MAX_ENTRY_15M_RSI:
         score -= 1.5
         reasons.append("15m overheated")
 
@@ -1202,6 +1205,7 @@ def build_rebalance_plan(market_data, market_context, krw, current_holdings, rec
                 "min_entry_change_6h_pct": MIN_ENTRY_CHANGE_6H_PCT,
                 "max_entry_atr_pct": MAX_ENTRY_ATR_PCT,
                 "max_entry_bb_position": MAX_ENTRY_BB_POSITION,
+                "max_entry_15m_rsi": MAX_ENTRY_15M_RSI,
                 "loss_ticker_cooldown_seconds": LOSS_TICKER_COOLDOWN_SECONDS,
             }
             for candidate in selected_candidates

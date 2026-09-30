@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-09-30 KST
+Last verified: 2026-10-01 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -249,6 +249,7 @@ Do not force-push over dashboard commits unless there is a deliberate reason.
 - Candidate entries are hard-blocked when the long-term trend is not aligned, the 1-hour or 15-minute trend is not aligned, the daily Bollinger position exceeds `MAX_ENTRY_BB_POSITION` (default `1.05`), the market is overheated, the move is too extended, or `atr_pct` exceeds `MAX_ENTRY_ATR_PCT` (default `5.0`).
 - Candidates with completed-candle one-hour returns below `MIN_ENTRY_CHANGE_1H_PCT` (default `-1.0%`) are now blocked even if their total score passes. This only affects entries. The September 9 historical selection diagnostic did not establish an incremental net-profit gain over the fixed two-hour cooldown; see `STRATEGY_REVIEW_2026-09-09.md` before claiming a performance improvement.
 - Candidates with completed-candle six-hour returns below `MIN_ENTRY_CHANGE_6H_PCT` (default `0.5%`) are blocked even if their total score passes. This entry-only rule was added from the September 28 realized and opportunity diagnostics; it does not change holding management or exits.
+- Candidates with completed-candle 15-minute RSI above `MAX_ENTRY_15M_RSI` (default `75.0`) are blocked as overheated. This October 1 entry-only change aligns the fast-timeframe ceiling with the existing one-hour ceiling and does not affect holding management or exits.
 - Entry order UUIDs and their indicator context persist through pending-order recovery and partial exits, and are attached to realized history. They are cleared from active state after a full exit. Malformed trade-history JSON now blocks new entries instead of silently clearing loss controls.
 - Full scan inputs and plans are captured privately after each completed cycle, including observed times and completed-candle start times. A diagnostic write failure does not block trade handling. The public decision payload includes the strategy version but excludes entry context.
 - A realized losing sell pauses all new entries across tickers for `LOSS_COOLDOWN_SECONDS` (default 3 hours), while existing holding management and exits continue. This complements the per-ticker 6-hour trade cooldown and reduces cross-ticker churn after a stop-out.

@@ -824,6 +824,21 @@ class TestTradingLogic(unittest.TestCase):
         self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
         self.assertIn("볼린저밴드 과열", plan["entry_rejections"][0]["reason"])
 
+    def test_fifteen_minute_rsi_overheat_is_hard_blocked_at_configured_boundary(self):
+        context = {"risk_mode": "normal", "market_volatility": "normal"}
+        allowed = sample_market_row("KRW-RSI-LIMIT", minute_rsi=75.0)
+        overheated = sample_market_row("KRW-RSI-HIGH", minute_rsi=75.01)
+
+        self.assertIsNone(autotrade.entry_block_reason(allowed, context))
+        self.assertEqual(autotrade.entry_block_reason(overheated, context), "과열 구간")
+
+        plan = autotrade.build_rebalance_plan(
+            [overheated], context, 100000, [],
+            {"count": 0, "avg_profit": 0, "loss_rate": 0, "net_profit": 0},
+        )
+        self.assertFalse([d for d in plan["decisions"] if d["decision"] == "BUY"])
+        self.assertEqual(plan["entry_rejections"][0]["reason"], "과열 구간")
+
     def test_small_loss_needs_hour_and_short_break_before_sell(self):
         holding = {
             "ticker": "KRW-ETH",
@@ -905,6 +920,10 @@ class TestTradingLogic(unittest.TestCase):
         self.assertEqual(
             plan["entry_contexts"]["KRW-ETH"]["min_entry_change_6h_pct"],
             autotrade.MIN_ENTRY_CHANGE_6H_PCT,
+        )
+        self.assertEqual(
+            plan["entry_contexts"]["KRW-ETH"]["max_entry_15m_rsi"],
+            autotrade.MAX_ENTRY_15M_RSI,
         )
         payload = autotrade._decision_snapshot_payload(plan)
         self.assertEqual(payload["strategy_version"], autotrade.STRATEGY_VERSION)
