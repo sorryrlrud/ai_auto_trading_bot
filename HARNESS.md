@@ -380,6 +380,15 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - The first private observation recorded the new strategy version and RSI ceiling. The existing twelve-hour loss-streak pause blocked entries, so no verification order was submitted.
 - Automatic dashboard commit `91afa8d` was pushed. The public GitHub Pages payload returned HTTP 200 with the 06:12:17 generation time, new strategy version, and entry-block reason. Bot-user GitHub access and a host-side fast-forward pull both succeeded.
 
+## Reporting deployment verified on 2026-10-02
+
+- Source/report revision: `94ba2a3`; VM backup: `/home/sorryrlrud/bot-backup-20261002-ztjp6tzd`.
+- Corrected the dashboard label to `실현 거래 수익률` and explained its completed-trade purchase-amount plus buy-fee denominator. Account flows and open-position marks are excluded; the calculation and data field are unchanged.
+- The VM fast-forwarded source and regenerated/published the dashboard from the existing container as the bot user (`0ccd963`). Because only the separately invoked generator changed, no trading-process restart or image rebuild was needed.
+- Local/VM/container generator SHA-256: `b9202da8e72f4c22656477ec007551000e46a2b9f883108d019d9a9e9617d855`. Trading source remains the October 1 strategy.
+- Public HTTP 200 and browser inspection confirmed the 06:08:56 dashboard and corrected wording. GitHub Pages run `36926685891` succeeded. The original container remained running with zero restarts/OOM, and the 06:09:03 risk check had zero failures/pending orders.
+- See `STRATEGY_REVIEW_2026-10-02.md` for the independently verified KRW 275 deposit, open BTC/ETH marks, forward RSI opportunity and reasons for keeping trading rules unchanged.
+
 ## Security notes
 
 - Do not place secrets, API keys, private key contents, or `.env` values in this file.

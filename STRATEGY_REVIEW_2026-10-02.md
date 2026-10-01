@@ -60,3 +60,11 @@ Rename the visible card from `누적 수익률` to `실현 거래 수익률`, an
 ## Validation
 
 The local suite passed all 105 tests. A dashboard generated from the private VM snapshot preserved 84 exits, -KRW 6,324.33, -0.4703%, and three recent decisions, while showing the corrected wording and excluding private entry context. The reporting-only change is deployed by updating the bind-mounted generator and publishing a freshly generated dashboard; the already-running bot does not need a restart.
+
+## Deployment verification
+
+- Source/report commit: `94ba2a3`; VM backup: `/home/sorryrlrud/bot-backup-20261002-ztjp6tzd`.
+- The VM fast-forwarded the source, then the existing container's bot user regenerated and published the dashboard as commit `0ccd963`. No bot restart, dependency installation or image rebuild was required.
+- Local, VM and container generator SHA-256 matched: `b9202da8e72f4c22656477ec007551000e46a2b9f883108d019d9a9e9617d855`. The trading source hash remained unchanged.
+- At 06:09:39, the original container was still running, with zero restarts and no OOM. The 06:09:03 risk check had zero failures and pending orders. Host-side fast-forward pull succeeded after the dashboard commit.
+- GitHub Pages deployment run `36926685891` completed successfully. Public HTTP 200 returned the 06:08:56 dashboard, corrected label and explanation, unchanged realized statistics, three decisions, and no private entry context. Browser visual inspection confirmed readable layout.
