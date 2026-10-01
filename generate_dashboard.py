@@ -314,7 +314,7 @@ def build_html(trades, recent_decisions, runtime_status):
         <div class="value" id="total-profit"></div>
       </article>
       <article class="stat">
-        <div class="label">누적 수익률</div>
+        <div class="label">실현 거래 수익률</div>
         <div class="value" id="total-return"></div>
       </article>
       <article class="stat">
@@ -326,6 +326,8 @@ def build_html(trades, recent_decisions, runtime_status):
         <div class="value" id="trade-count"></div>
       </article>
     </section>
+
+    <p class="muted">실현 거래 수익률 = 누적 실현손익 ÷ 완료 거래의 매수금액·매수 수수료 합계. 입출금과 보유 중인 자산의 평가손익은 제외됩니다.</p>
 
     <h2 class="section-title">운영 상태</h2>
     <section class="runtime-card">
