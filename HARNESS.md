@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-02 KST
+Last verified: 2026-10-04 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -388,6 +388,13 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - Local/VM/container generator SHA-256: `b9202da8e72f4c22656477ec007551000e46a2b9f883108d019d9a9e9617d855`. Trading source remains the October 1 strategy.
 - Public HTTP 200 and browser inspection confirmed the 06:08:56 dashboard and corrected wording. GitHub Pages run `36926685891` succeeded. The original container remained running with zero restarts/OOM, and the 06:09:03 risk check had zero failures/pending orders.
 - See `STRATEGY_REVIEW_2026-10-02.md` for the independently verified KRW 275 deposit, open BTC/ETH marks, forward RSI opportunity and reasons for keeping trading rules unchanged.
+
+## Daily review verified on 2026-10-04
+
+- VM/container remained healthy with zero restarts, OOM, cycle/risk failures or pending orders; the 06:01:32 cycle and subsequent risk checks succeeded. Trading source remains the October 1 strategy, and the dashboard generator remains the October 2 reporting correction.
+- Upbit CLI on the VM independently verified KRW 58,874.58949578, no holdings/locked balances/open orders, and the three sells since the last documented October 2 review. Those sells netted +KRW 78.99; no new trade occurred after the scheduled prior run at October 3 12:12 KST. The October 1 KRW 275 deposit was excluded from profit.
+- Lifetime realized PnL remains negative at -KRW 6,245.34. Current-version forward evidence is only three completed trades. Rechecking the relevant fixed-entry subset still disfavors a price-only trail on net PnL, so trading rules remain unchanged.
+- Local 105-test suite passed in an isolated temporary copy with socket connections blocked. Public HTTP 200 showed the current heartbeat, three decisions and no private entry context. Only this operations guide and `STRATEGY_REVIEW_2026-10-04.md` are synchronized; no trading-process restart or image rebuild is required.
 
 ## Security notes
 
