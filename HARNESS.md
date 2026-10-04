@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-04 KST
+Last verified: 2026-10-05 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -395,6 +395,13 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - Upbit CLI on the VM independently verified KRW 58,874.58949578, no holdings/locked balances/open orders, and the three sells since the last documented October 2 review. Those sells netted +KRW 78.99; no new trade occurred after the scheduled prior run at October 3 12:12 KST. The October 1 KRW 275 deposit was excluded from profit.
 - Lifetime realized PnL remains negative at -KRW 6,245.34. Current-version forward evidence is only three completed trades. Rechecking the relevant fixed-entry subset still disfavors a price-only trail on net PnL, so trading rules remain unchanged.
 - Local 105-test suite passed in an isolated temporary copy with socket connections blocked. Public HTTP 200 showed the current heartbeat, three decisions and no private entry context. Only this operations guide and `STRATEGY_REVIEW_2026-10-04.md` are synchronized; no trading-process restart or image rebuild is required.
+
+## Daily review verified on 2026-10-05
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The 06:01:41 cycle and 06:06:21 risk check succeeded; public HTTP 200 showed the current heartbeat and three decisions without private entry context.
+- Upbit CLI independently verified two new filled market buys (SOL and XRP), no sells, no new flows or open orders, and cash KRW 29,562.1658117. Actual entry quantities, funds and fees reconcile with VM state and prior cash. At the 06:04:01 price snapshot, equity was KRW 58,906.58 (+0.05433% since the prior all-cash baseline); estimated open-position liquidation PnL was +KRW 17.31 before adverse execution movement.
+- Lifetime realized PnL remains -KRW 6,245.34 and current-version completed trades remain three. A new RSI-only blocked BTC signal has no forward price path yet; exit diagnostics still disfavour price-only trailing exits. Trading rules and configuration remain unchanged.
+- All 105 local tests passed in an isolated temporary copy with socket connections blocked. Only this guide and `STRATEGY_REVIEW_2026-10-05.md` require synchronization; no trading-process restart or image rebuild is needed.
 
 ## Security notes
 
