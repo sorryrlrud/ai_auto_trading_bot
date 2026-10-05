@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-05 KST
+Last verified: 2026-10-06 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -402,6 +402,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - Upbit CLI independently verified two new filled market buys (SOL and XRP), no sells, no new flows or open orders, and cash KRW 29,562.1658117. Actual entry quantities, funds and fees reconcile with VM state and prior cash. At the 06:04:01 price snapshot, equity was KRW 58,906.58 (+0.05433% since the prior all-cash baseline); estimated open-position liquidation PnL was +KRW 17.31 before adverse execution movement.
 - Lifetime realized PnL remains -KRW 6,245.34 and current-version completed trades remain three. A new RSI-only blocked BTC signal has no forward price path yet; exit diagnostics still disfavour price-only trailing exits. Trading rules and configuration remain unchanged.
 - All 105 local tests passed in an isolated temporary copy with socket connections blocked. Only this guide and `STRATEGY_REVIEW_2026-10-05.md` require synchronization; no trading-process restart or image rebuild is needed.
+
+## Daily review verified on 2026-10-06
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The 06:01:35 cycle and 06:03:30 risk check succeeded. Trading source and generator hashes remain unchanged.
+- Upbit CLI independently verified one new buy and three full exits, no new flows, no holdings/locked funds/open orders, and cash KRW 58,436.02440822. Exact new net PnL -KRW 438.565087557572 reconciles with the October 4 all-cash baseline. Lifetime PnL is -KRW 6,683.91; current-version six completed trades net -KRW 359.58.
+- XRP exited profitably after profit memory armed; SOL and ZKP never armed. ZKP's independent hard stop executed normally, with observed trigger/fill movement and fees explaining its -2.57% net loss. Six current-version trades and mixed RSI-only forward signals do not support another rule change.
+- Public HTTP 200 still showed 04:31:34 at 06:05 despite the VM and pushed repository showing 06:01:36. GitHub run 37373345322 was queued without a runner, with prior builds cancelled before executing steps. Official Actions incident 3q1yb5m7ltvb reports hosted-runner assignment delays and a major outage. Public deployment freshness is blocked externally; successful repository push alone is not proof of public deployment success.
+- All 105 isolated local tests passed with socket connections blocked. Only this guide and `STRATEGY_REVIEW_2026-10-06.md` are synchronized; the unchanged trading process requires no restart or image rebuild. Next review must check Actions recovery and public heartbeat freshness.
 
 ## Security notes
 
