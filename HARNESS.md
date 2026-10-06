@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-06 KST
+Last verified: 2026-10-07 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -410,6 +410,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - XRP exited profitably after profit memory armed; SOL and ZKP never armed. ZKP's independent hard stop executed normally, with observed trigger/fill movement and fees explaining its -2.57% net loss. Six current-version trades and mixed RSI-only forward signals do not support another rule change.
 - Public HTTP 200 still showed 04:31:34 at 06:05 despite the VM and pushed repository showing 06:01:36. GitHub run 37373345322 was queued without a runner, with prior builds cancelled before executing steps. Official Actions incident 3q1yb5m7ltvb reports hosted-runner assignment delays and a major outage. Public deployment freshness is blocked externally; successful repository push alone is not proof of public deployment success.
 - All 105 isolated local tests passed with socket connections blocked. Only this guide and `STRATEGY_REVIEW_2026-10-06.md` are synchronized; the unchanged trading process requires no restart or image rebuild. Next review must check Actions recovery and public heartbeat freshness.
+
+## Daily review verified on 2026-10-07
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The 06:01:33 cycle and 06:03:17 risk check succeeded; trading and generator hashes remain unchanged.
+- Upbit CLI independently verified one new SOL buy/full exit, exact net PnL -KRW 121.103340540 and cash KRW 58,314.92106768. Quantities, funds and fees reconcile exactly with the previous all-cash balance; there are no holdings, locked funds, open orders or new flows. Lifetime realized PnL is -KRW 6,805.01; current-version seven completed trades net -KRW 480.68.
+- SOL's allowed reentry and joint-trend loss exit complied with existing controls; its +0.2445% peak never armed profit protection. Three consecutive losses correctly triggered the twelve-hour pause. Additional paused signals and unchanged mixed RSI-only evidence do not support a rule change.
+- Actions recovered from incident 3q1yb5m7ltvb. Pages run 37530866831 succeeded for dashboard commit 049c27a, and public HTTP 200 independently showed the 06:01:34 generation time, 06:01:33 cycle, three decisions and no private entry context/order UUID.
+- Journal rotation reduced coverage to September 21 onward: 1,512 observations and thirteen comparable fixed-entry paths. Do not compare this total directly with yesterday's sixteen-path result. All 105 isolated local tests passed; only this guide and STRATEGY_REVIEW_2026-10-07.md require synchronization, with no trading restart or image rebuild.
 
 ## Security notes
 
