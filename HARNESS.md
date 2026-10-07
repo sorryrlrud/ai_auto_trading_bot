@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-07 KST
+Last verified: 2026-10-08 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -418,6 +418,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - SOL's allowed reentry and joint-trend loss exit complied with existing controls; its +0.2445% peak never armed profit protection. Three consecutive losses correctly triggered the twelve-hour pause. Additional paused signals and unchanged mixed RSI-only evidence do not support a rule change.
 - Actions recovered from incident 3q1yb5m7ltvb. Pages run 37530866831 succeeded for dashboard commit 049c27a, and public HTTP 200 independently showed the 06:01:34 generation time, 06:01:33 cycle, three decisions and no private entry context/order UUID.
 - Journal rotation reduced coverage to September 21 onward: 1,512 observations and thirteen comparable fixed-entry paths. Do not compare this total directly with yesterday's sixteen-path result. All 105 isolated local tests passed; only this guide and STRATEGY_REVIEW_2026-10-07.md require synchronization, with no trading restart or image rebuild.
+
+## Daily review verified on 2026-10-08
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The 05:46:33 cycle and 05:58:01 risk check succeeded; source/generator hashes remain unchanged. Public HTTP 200 showed the 05:31:33 bounded heartbeat, three decisions and no private entry context/UUID; Pages run 37682661752 succeeded.
+- Upbit CLI independently verified one new SOL buy/full exit, exact net PnL -KRW 350.455074885, and cash KRW 57,964.4659928. Quantity, funds and fees reconcile with prior cash within exchange decimal precision; there are no holdings, locked funds, open orders or new flows. Lifetime PnL is -KRW 7,155.47; current-version eight completed trades net -KRW 831.14.
+- SOL's third current-version loss followed a valid sixteen-hour reentry gap. Its peak never armed profit memory; the next minute-level risk check after threshold crossing executed the hard stop, with fill movement and fees explaining the -2.4147% net loss. The twelve-hour global pause and subsequent defensive market gate behaved as intended.
+- Longer ticker-pause diagnostics also remove an ETH winner and change which later loss triggers a pause; eighteen-hour sample maximization would tune to today's loss. No new RSI-only evidence or exit alternative supports changing rules. Trading configuration remains unchanged.
+- Journal coverage is September 21 onward, 1,607 observations and fourteen comparable holding paths, with one new SOL loss since the previous review. All 105 isolated local tests passed. Only this guide and STRATEGY_REVIEW_2026-10-08.md require synchronization; no trading restart or image rebuild is required.
 
 ## Security notes
 
