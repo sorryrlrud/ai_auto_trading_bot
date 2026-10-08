@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-08 KST
+Last verified: 2026-10-09 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -426,6 +426,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - SOL's third current-version loss followed a valid sixteen-hour reentry gap. Its peak never armed profit memory; the next minute-level risk check after threshold crossing executed the hard stop, with fill movement and fees explaining the -2.4147% net loss. The twelve-hour global pause and subsequent defensive market gate behaved as intended.
 - Longer ticker-pause diagnostics also remove an ETH winner and change which later loss triggers a pause; eighteen-hour sample maximization would tune to today's loss. No new RSI-only evidence or exit alternative supports changing rules. Trading configuration remains unchanged.
 - Journal coverage is September 21 onward, 1,607 observations and fourteen comparable holding paths, with one new SOL loss since the previous review. All 105 isolated local tests passed. Only this guide and STRATEGY_REVIEW_2026-10-08.md require synchronization; no trading restart or image rebuild is required.
+
+## Daily review verified on 2026-10-09
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The 05:46:32 cycle and 05:58:58 risk check succeeded; source/generator hashes remain unchanged. Logs since the previous run contained 1,920 INFO records and no warnings/errors.
+- Read-only VM Upbit CLI independently verified unchanged all-cash KRW 57,964.4659928, no locked balances, waiting/reserved orders, new completed orders or new flows. Lifetime realized PnL remains -KRW 7,155.47; the current eight-trade strategy remains -KRW 831.14 (-1.41360% against the flow-adjusted cash baseline).
+- All 96 newly observed cycles were defensive and intentionally blocked entries. The existing loss-streak pause had expired. No new trade, numeric opportunity, RSI-only signal or holding path changes the previous diagnostics; trading rules and configuration remain unchanged.
+- Journal coverage is September 21 onward, 1,703 observations and the same fourteen comparable holding paths. All 105 isolated local tests passed with sockets blocked. Pages run 37834484417 succeeded; public HTTP 200 showed the 04:46:37 heartbeat, three decisions and no private context/UUID. Unchanged heartbeat refreshes occur on the first cycle after the hourly minimum spacing, allowing approximately 75 minutes before refresh plus external deployment latency.
+- The next real cycle completed at 06:01:32, stayed defensive, and generated the due heartbeat commit `ad40c5e`; its 06:01:00 risk check also succeeded. Only this guide and STRATEGY_REVIEW_2026-10-09.md require synchronization; no trading restart or image rebuild is required.
 
 ## Security notes
 
