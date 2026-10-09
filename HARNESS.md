@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-09 KST
+Last verified: 2026-10-10 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -434,6 +434,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - All 96 newly observed cycles were defensive and intentionally blocked entries. The existing loss-streak pause had expired. No new trade, numeric opportunity, RSI-only signal or holding path changes the previous diagnostics; trading rules and configuration remain unchanged.
 - Journal coverage is September 21 onward, 1,703 observations and the same fourteen comparable holding paths. All 105 isolated local tests passed with sockets blocked. Pages run 37834484417 succeeded; public HTTP 200 showed the 04:46:37 heartbeat, three decisions and no private context/UUID. Unchanged heartbeat refreshes occur on the first cycle after the hourly minimum spacing, allowing approximately 75 minutes before refresh plus external deployment latency.
 - The next real cycle completed at 06:01:32, stayed defensive, and generated the due heartbeat commit `ad40c5e`; its 06:01:00 risk check also succeeded. Only this guide and STRATEGY_REVIEW_2026-10-09.md require synchronization; no trading restart or image rebuild is required.
+
+## Daily review verified on 2026-10-10
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The initial 05:46:32 cycle and 05:57:17 risk check succeeded; source/generator hashes remain unchanged. Initial logs since the prior run contain 1,918 INFO records and no warnings/errors; disk usage is 31% and no zombies were found.
+- Read-only VM Upbit CLI independently verified unchanged all-cash KRW 57,964.4659928, zero locked funds/open orders and no new completed orders or flows. Lifetime realized PnL remains -KRW 7,155.47; the current eight-trade strategy remains -KRW 831.14 (-1.41360% against the flow-adjusted cash baseline).
+- All 96 new observed cycles were defensive and submitted no order. No new numeric opportunity, RSI-only signal or holding path changes the prior cooldown/exit diagnostics. Trading rules and configuration remain unchanged.
+- Journal coverage remains September 21 onward with 1,799 observations and fourteen comparable holding paths. All 105 isolated local tests passed with sockets blocked. Pages run 37985879495 succeeded; public HTTP 200 showed the 05:16:32 heartbeat, three decisions and no private context/UUID.
+- Only this guide and STRATEGY_REVIEW_2026-10-10.md require publishing and VM synchronization; the unchanged trading process needs no restart or image rebuild.
 
 ## Security notes
 
