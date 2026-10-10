@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-10 KST
+Last verified: 2026-10-11 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -442,6 +442,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - All 96 new observed cycles were defensive and submitted no order. No new numeric opportunity, RSI-only signal or holding path changes the prior cooldown/exit diagnostics. Trading rules and configuration remain unchanged.
 - Journal coverage remains September 21 onward with 1,799 observations and fourteen comparable holding paths. All 105 isolated local tests passed with sockets blocked. Pages run 37985879495 succeeded; public HTTP 200 showed the 05:16:32 heartbeat, three decisions and no private context/UUID.
 - Only this guide and STRATEGY_REVIEW_2026-10-10.md require publishing and VM synchronization; the unchanged trading process needs no restart or image rebuild.
+
+## Daily review verified on 2026-10-11
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The 06:01:33 cycle and 06:02:46 risk check succeeded; source/generator hashes remain unchanged. Snapshot logs since the previous verified run contain 1,927 INFO records and no warnings/errors; disk usage is 31% and no zombies were found.
+- Read-only VM Upbit CLI independently verified unchanged all-cash KRW 57,964.4659928, zero locked funds/open orders and no new completed orders or flows. Lifetime realized PnL remains -KRW 7,155.47; the current eight-trade strategy remains -KRW 831.14 (-1.41360% against the flow-adjusted cash baseline).
+- All 97 new observations since yesterday's 05:46 snapshot are defensive and submit no order. No new numeric opportunity, RSI-only signal or holding path changes the prior cooldown/exit diagnostics. Trading source and configuration remain unchanged.
+- Journal coverage remains September 21 onward with 1,896 observations and fourteen comparable holding paths. All 105 isolated local tests passed with sockets blocked. Pages run 38086033204 completed build/report/deploy successfully; public HTTP 200 showed the 06:01:33 heartbeat, three decisions and no private context/UUID.
+- Only this guide and STRATEGY_REVIEW_2026-10-11.md require publishing and VM fast-forward synchronization; the unchanged trading process needs no restart or image rebuild.
 
 ## Security notes
 
