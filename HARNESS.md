@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-12 KST
+Last verified: 2026-10-13 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -458,6 +458,15 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - All 96 new cycle observations are defensive and submit no order. No new eligible opportunity, RSI-only signal or holding path changes the prior diagnostics. Trading source/configuration remain unchanged; the latest 24 signals also fail numeric filters when defensive blocking is diagnostically bypassed.
 - Journal coverage remains September 21 onward with 1,992 observations and the same fourteen comparable holding paths. All 105 isolated local tests passed with sockets blocked. Pages run 38173624111 completed successfully; public HTTP 200 showed the 05:46:37 heartbeat, three decisions and no private entry context/UUID.
 - Only this guide and STRATEGY_REVIEW_2026-10-12.md require publishing and VM fast-forward synchronization; the unchanged trading process requires no image build or restart.
+
+## Daily review verified on 2026-10-13
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The 05:46:30 cycle and 05:57:51 risk check succeeded; trading/generator hashes match local, VM and container. Snapshot logs since the prior final verification contain 1,903 INFO records and no warnings/errors. Disk usage is 32% and no zombies were found.
+- Read-only VM Upbit CLI independently verified unchanged all-cash KRW 57,964.4659928, zero locked funds/open orders and no new completed orders or flows. Lifetime PnL remains -KRW 7,155.47; current eight-trade strategy remains -KRW 831.14 (-1.41360% against the flow-adjusted cash baseline).
+- All 95 new observations are defensive with no order plan or holding. The latest 21 candidates also fail numeric filters when defensive blocking is diagnostically bypassed. No new eligible opportunity or RSI-only signal supports changing trading rules/configuration.
+- Journal rotation moved coverage to September 26 onward: 1,585 observations, 502 older observations removed, and eleven comparable holding paths versus fourteen yesterday. Recalculated exit totals reflect this sample change, not new performance. All eight current-version paths remain present and unchanged under both exit alternatives.
+- All 105 isolated local tests passed with sockets blocked. Pages run 38304791681 succeeded; public HTTP 200 showed the 05:31:31 generation / 05:31:30 cycle heartbeat, 92 exits, three decisions and no private context/UUID.
+- Only this guide and STRATEGY_REVIEW_2026-10-13.md require publishing and VM fast-forward synchronization; unchanged trading code requires no image build or restart.
 
 ## Security notes
 
