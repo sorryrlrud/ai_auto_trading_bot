@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-15 KST
+Last verified: 2026-10-16 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -483,6 +483,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - All 95 new initial observations and the following 06:01:30 cycle are defensive without order plans or holdings. The latest initial 21 candidates also fail numeric filters if defensive blocking is diagnostically bypassed. No new eligible opportunity supports changing trading rules/configuration.
 - Journal coverage remains September 26 onward: 1,777 initial observations, 96 additions relative to yesterday's initial snapshot and no rotation. The same eleven comparable holding paths and all eight current-version paths retain unchanged diagnostics. All 105 isolated local tests passed with sockets blocked.
 - Pages run 38632819661 completed build/report/deploy successfully; public HTTP 200 showed 05:31:31 generation / 05:31:30 cycle, 92 exits, three decisions and no private context/UUID. Only this guide and STRATEGY_REVIEW_2026-10-15.md require publishing and VM fast-forward synchronization; unchanged trading code requires no image build or restart.
+
+## Daily review verified on 2026-10-16
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. Initial cycle completed at 05:46:30 and the 05:59:08 risk check succeeded. Trading/generator hashes match local, VM and container. Initial logs since October 15 06:03:40 contain 1,907 INFO records and no warnings/errors; disk usage is 33%, available memory 471 MiB, and there are no zombies. Bot-user GitHub SSH succeeds.
+- Read-only VM Upbit CLI checks at 05:59:02 independently verified unchanged all-cash KRW 57,964.4659928, zero locked funds/open orders and no new completed orders or flows. Lifetime realized PnL remains -KRW 7,155.47; the current eight-trade strategy remains -KRW 831.14 (-1.41360% against the flow-adjusted cash baseline).
+- All 95 initial observations after yesterday's final cycle are defensive, without order plans or holdings. All latest 21 candidates fail numeric filters when defensive blocking is diagnostically bypassed: ATR 15, daily MA20 four, and hourly momentum two. No new eligible opportunity supports a trading-rule/configuration change.
+- Journal coverage remains September 26 onward: 1,873 observations, 96 additions relative to yesterday's initial snapshot and no rotation. The same eleven comparable paths and all eight current-version paths retain unchanged exit diagnostics. All 105 isolated local tests passed with socket connections blocked.
+- Pages run 38800607594 completed build/report/deploy successfully; public HTTP 200 showed 05:16:30 generation/cycle, 92 exits, three decisions and no private context/UUID. Publish this guide and STRATEGY_REVIEW_2026-10-16.md and fast-forward the VM. Unchanged trading code requires no image build or restart.
 
 ## Security notes
 
