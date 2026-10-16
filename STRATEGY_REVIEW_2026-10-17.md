@@ -2,7 +2,7 @@
 
 ## Production verification
 
-Direct SSH checks of GCP VM `/home/sorryrlrud/ai_auto_trading_bot` and container `quant-ai-bot` confirmed healthy operation. The container has run since October 1 06:10:59 KST, with zero restarts and no OOM. The initial completed cycle was **05:46:32** and the **05:58:34** risk check succeeded. Cycle failures, risk failures and pending orders are zero. September 7's error timestamp is historical. The next scheduled cycle started normally at 06:00:20; its completion requires a separate follow-up check.
+Direct SSH checks of GCP VM `/home/sorryrlrud/ai_auto_trading_bot` and container `quant-ai-bot` confirmed healthy operation. The container has run since October 1 06:10:59 KST, with zero restarts and no OOM. The initial completed cycle was **05:46:32** and the **05:58:34** risk check succeeded. Cycle failures, risk failures and pending orders are zero. September 7's error timestamp is historical. The next scheduled cycle started normally at 06:00:20 and a follow-up VM check confirmed its successful completion at **06:01:30**, still defensive with no decisions or holdings.
 
 Initial snapshot logs after October 16 06:01:30 contain **1,910 INFO records**, no WARNING/ERROR/CRITICAL and no buy/sell/realized events. Disk usage is 32%, available memory 473 MiB and container memory 86.51 MiB; no zombies were found. VM Git is clean and bot-user GitHub SSH succeeds. Trading source and generator SHA-256 values match local, VM and container: `67d5f857a082d30ee7f91d95d5767f4792c2fec54edf4ed8d6e2099721b29081` and `b9202da8e72f4c22656477ec007551000e46a2b9f883108d019d9a9e9617d855`. Trading/dashboard publishing are enabled, single-run mode is disabled, and absent entry overrides use source defaults confirmed by private observations. No local Docker command was used.
 
@@ -46,3 +46,5 @@ Seven eligible entries still lack holding paths. On the same eleven observable e
 **Keep trading source and configuration unchanged.** Results remain negative, but there is no new completed trade, eligible opportunity or runtime defect supporting a threshold change. Continue tracking allowed same-ticker repeat losses, new RSI-only opportunities, armed-profit losses and stop trigger/fill gaps; preserve coverage and cash-flow boundaries.
 
 All **105 local tests passed** in an isolated temporary source copy with socket connections blocked. Publish this report and `HARNESS.md`, then synchronize the VM by fast-forward. Unchanged trading code requires no image build or container restart. Private snapshots, credentials and the user's untracked `AGENTS.md` are excluded from Git.
+
+The review was published as `ef39603e` and fast-forward synchronized to the VM. Document hashes match local/VM, the VM working tree is clean, and the container remains running without restart or OOM. The follow-up 06:01:30 real cycle adds one further defensive observation after the initial snapshot.
