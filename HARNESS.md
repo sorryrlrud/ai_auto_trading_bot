@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-17 KST
+Last verified: 2026-10-18 KST
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -499,6 +499,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - All 95 initial observations after yesterday's final cycle are defensive, with no plans or holdings. Diagnostically bypassing defensive blocking still rejects all 22 latest candidates: 18 exceed ATR and four miss six-hour momentum. No new eligible opportunity supports a trading-rule/configuration change.
 - Journal coverage remains September 26 onward: 1,969 observations, 96 additions against yesterday's initial snapshot and no rotation. Eleven comparable exit paths and all eight current-version paths retain unchanged diagnostics. All 105 isolated local tests passed with socket connections blocked.
 - Pages run 38961057159 completed build/report/deploy successfully; public HTTP 200 showed 05:16:32 generation/cycle, 92 exits, three decisions and no private context/UUID. Publish this guide and STRATEGY_REVIEW_2026-10-17.md and fast-forward the VM. Unchanged trading code requires no image build or restart.
+
+## Daily review verified on 2026-10-18
+
+- Direct VM/container checks confirmed zero restarts, OOM, cycle/risk failures and pending orders. The 06:01:28 cycle and 06:02:47 risk check succeeded. Trading/generator hashes match local, VM and container. Snapshot logs after October 17 06:01:37 contain 1,920 INFO records and no warnings/errors; disk usage is 32%, available memory 479 MiB and no zombies were found. Bot-user GitHub SSH succeeds.
+- Read-only VM Upbit CLI checks at 06:04:16 independently verified unchanged all-cash KRW 57,964.4659928, no locked funds, open orders, new completed orders or flows. Lifetime realized PnL remains -KRW 7,155.47; current eight-trade strategy remains -KRW 831.14 (-1.41360% against its flow-adjusted baseline).
+- All 96 observations after yesterday's final cycle are defensive, with no plans or holdings. Diagnostically bypassing defensive blocking rejects all 20 latest candidates: 16 exceed ATR and four miss six-hour momentum. No new numeric opportunity under current/prior RSI rules supports changing trading rules/configuration.
+- Journal coverage remains September 26 onward: 2,066 observations, 97 additions against yesterday's initial snapshot and no rotation. Recalculated eleven-path exit and eighteen-entry ticker-pause diagnostics are unchanged; all eight current-version trades retain their observed results under both exit alternatives. All 105 isolated local tests passed with socket connections blocked.
+- Pages run 39069175215 completed build/report/deploy successfully; public HTTP 200 showed 06:01:28 generation/cycle, 92 exits, three decisions and no private context/UUID. Publish this guide and STRATEGY_REVIEW_2026-10-18.md and fast-forward the VM. Unchanged trading code requires no image build or restart.
 
 ## Security notes
 
