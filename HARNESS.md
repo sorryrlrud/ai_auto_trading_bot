@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-18 KST
+Last verified: 2026-10-19 KST (exchange API unavailable during scheduled maintenance)
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -507,6 +507,15 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - All 96 observations after yesterday's final cycle are defensive, with no plans or holdings. Diagnostically bypassing defensive blocking rejects all 20 latest candidates: 16 exceed ATR and four miss six-hour momentum. No new numeric opportunity under current/prior RSI rules supports changing trading rules/configuration.
 - Journal coverage remains September 26 onward: 2,066 observations, 97 additions against yesterday's initial snapshot and no rotation. Recalculated eleven-path exit and eighteen-entry ticker-pause diagnostics are unchanged; all eight current-version trades retain their observed results under both exit alternatives. All 105 isolated local tests passed with socket connections blocked.
 - Pages run 39069175215 completed build/report/deploy successfully; public HTTP 200 showed 06:01:28 generation/cycle, 92 exits, three decisions and no private context/UUID. Publish this guide and STRATEGY_REVIEW_2026-10-18.md and fast-forward the VM. Unchanged trading code requires no image build or restart.
+
+## Daily review verified on 2026-10-19
+
+- The VM/container process is running, but **trading/risk service health is degraded**. Last successful cycle is 02:01:34 KST and last successful risk check 02:02:07. The 05:56 snapshot has 33 consecutive cycle failures and 174 risk failures, all during Upbit connectivity loss; zero pending orders is the last local state, not a fresh exchange verification. Container has zero restarts/OOM, disk use 32%, available memory 472 MiB and matching trading/generator hashes. GitHub publishing remains accessible.
+- [Official Upbit notice](https://support.upbit.com/hc/ko/articles/59610087642009-서버-점검-안내-10-19-02-00) schedules full-service maintenance for October 19 02:00–08:00 KST, subject to change. VM host/container and independent public endpoint probes fail for Upbit while GitHub succeeds. A read-only VM Upbit CLI accounts request at 05:59 exceeded an 18-second deadline. Fresh balance, fills, open orders and flows cannot be reconciled until service returns. Do not infer a VM firewall/DNS defect from this exchange-specific failure or mark the bot healthy merely because its process runs.
+- Recorded performance remains 92 exits / -KRW 7,155.47 lifetime and eight current-version trades / -KRW 831.14. The last successful 02:01:34 cycle records KRW 57,964.4659928 and zero holdings; October 18's last independently reconciled account remains the exchange comparison boundary. The -1.41360% flow-adjusted baseline comparison is carried forward, not a newly verified account return.
+- Eighty new successful observations are defensive with no decisions/holdings. Journal rotation moved coverage to October 2 00:31:40: 1,639 observations versus 2,066 previously, implying 507 older records removed after 80 additions. Current/prior RSI gates yield no new eligible signal. Only eight of eighteen eligible completed entries retain holding paths; all eight current-version paths remain available and unchanged. Compare coverage explicitly before comparing older diagnostics.
+- All 105 isolated, socket-blocked local tests passed. Pages run 39164226288 succeeded; public HTTP 200 publishes the 05:38:25 failure snapshot, 92 exits and three decisions, with no private entry context/UUID. No trading-source/configuration change is justified. Synchronize this guide and STRATEGY_REVIEW_2026-10-19.md on the VM; no trading restart or image rebuild is required.
+- **Recovery verification remains pending:** after official maintenance completes, inspect VM runtime status and require both cycle and risk success timestamps newer than the outage, failure counters reset to zero, then reconcile CLI accounts, both closed-order states, wait/watch open orders and deposits/withdrawals since the previous verified boundary. Check pending-order reconciliation and dashboard publication. Existing code retries automatically and records failures; do not reset runtime status manually, bypass risk checks or create a verification order.
 
 ## Security notes
 
