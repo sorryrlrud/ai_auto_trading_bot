@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-19 KST (exchange API unavailable during scheduled maintenance)
+Last verified: 2026-10-20 KST (automatic exchange recovery and account reconciliation verified)
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -516,6 +516,14 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - Eighty new successful observations are defensive with no decisions/holdings. Journal rotation moved coverage to October 2 00:31:40: 1,639 observations versus 2,066 previously, implying 507 older records removed after 80 additions. Current/prior RSI gates yield no new eligible signal. Only eight of eighteen eligible completed entries retain holding paths; all eight current-version paths remain available and unchanged. Compare coverage explicitly before comparing older diagnostics.
 - All 105 isolated, socket-blocked local tests passed. Pages run 39164226288 succeeded; public HTTP 200 publishes the 05:38:25 failure snapshot, 92 exits and three decisions, with no private entry context/UUID. No trading-source/configuration change is justified. Synchronize this guide and STRATEGY_REVIEW_2026-10-19.md on the VM; no trading restart or image rebuild is required.
 - **Recovery verification remains pending:** after official maintenance completes, inspect VM runtime status and require both cycle and risk success timestamps newer than the outage, failure counters reset to zero, then reconcile CLI accounts, both closed-order states, wait/watch open orders and deposits/withdrawals since the previous verified boundary. Check pending-order reconciliation and dashboard publication. Existing code retries automatically and records failures; do not reset runtime status manually, bypass risk checks or create a verification order.
+
+## Daily review verified on 2026-10-20
+
+- Direct VM/container checks verified automatic recovery without a restart: October 20 06:01:35 cycle and 06:03:17 risk success, both failure counters and pending orders zero. The process remains running since October 1 with zero restarts/OOM; source/generator hashes match local, VM and container. Disk use is 32%, available memory 480 MiB and no zombies were found. Historical October 19 error timestamps precede subsequent successes and must not be treated as current failures.
+- The official exchange notice now reports maintenance completion and sequential trading resumption from October 19 06:55. VM risk/account retrieval recovered at 06:30:18 and the first cycle observation is 06:31:57; these earlier successful API checks are not proof that trading had resumed. No trade was submitted during the interval. Snapshot logs after yesterday's 06:01:01 contain 22 remaining outage errors, none after 06:30. One later KRW-ICX ticker HTTP-404 warning was handled by the existing skip path and its cycle completed.
+- Read-only VM Upbit CLI checks beginning 06:04:52 independently confirm KRW 57,964.4659928, zero holdings/locked funds/open orders, and no closed orders or flows since the last October 18 06:04:16 reconciliation. Both done/cancel and wait/watch states were queried. Yesterday's pending recovery checklist is satisfied. Lifetime PnL remains -KRW 7,155.47 and eight current-version trades remain -KRW 831.14, or -1.41360% against the existing flow-adjusted baseline.
+- All 95 new observations are defensive with no decisions or holdings. Latest 22 candidates also fail numeric gates with defensive blocking diagnostically bypassed: 18 exceed ATR and four miss six-hour momentum. Journal coverage is October 2 onward, 1,734 records, no new rotation. Retained prior-RSI opportunities remain 19; eighteen-entry pause and eight-path exit comparisons remain unchanged. No evidence supports changing trading rules or configuration.
+- All 105 isolated local tests passed with socket connections blocked. Pages run 39322132705 succeeded; public HTTP 200 shows 05:46:32 generation, recovered cycle/risk and zero failure counters, 92 exits/three decisions, with no private entry context/UUID. Publish this guide and STRATEGY_REVIEW_2026-10-20.md and fast-forward the VM; unchanged trading code requires no image build or restart.
 
 ## Security notes
 
