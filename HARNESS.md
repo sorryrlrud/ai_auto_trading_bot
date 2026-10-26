@@ -1,6 +1,6 @@
 # Operations Harness
 
-Last verified: 2026-10-26 KST (live health, exchange reconciliation and strategy review verified)
+Last verified: 2026-10-27 KST (live health, exchange reconciliation and strategy review verified)
 
 This file is a handoff guide for future sessions working on the live trading bot. Read this before assuming that the local Docker environment is production.
 
@@ -566,6 +566,13 @@ The entrypoint now drops the Python process to the host-compatible UID/GID, so n
 - Read-only VM-host Upbit CLI reconciliation 06:02:29–06:02:36 confirms unchanged all-cash KRW 57,964.4659928, no holdings/locked/open orders/new closed orders/flows. Both done/cancel and wait/watch states checked. Lifetime 92 exits / -KRW 7,155.47; current eight trades / -KRW 831.14 (-1.41360% against existing flow-adjusted baseline). Previously verified deposits/losses are not new activity.
 - Four journal files total 1,812 observations from October 7 onward: 96 additions/no rotation, all defensive without holdings/plans. Latest 21 candidates fail 14 ATR/four six-hour momentum/one Bollinger/one daily MA alignment/one price-below-MA20 even with defensive blocking alone bypassed. No new allowed numeric signals at RSI 75/78; one retained prior-rule spaced opportunity/no RSI-only opportunities. One new defensive-only MTL candidate at October 25 19:16:19 scores 13 versus 12.5; observed one/three/six-hour prices change -6.73317%/-8.47880%/-9.22693%. These are price paths, not simulated fills or realized avoided losses. Preserve defensive blocking and existing rules/configuration. Eighteen-entry ticker-pause and one-path exit diagnostics remain unchanged; seventeen paths are unavailable.
 - All 105 isolated socket-blocked tests passed. Pages run 40232350003 succeeded; public HTTP 200 serves 05:46:31 generation, cycle 05:46:30/risk 05:45:56, zero failures, 92 exits/three decisions without private fields. The previous review's pending next heartbeat is now confirmed. Publish STRATEGY_REVIEW_2026-10-26.md and this guide, fast-forward the VM and verify final health. Documentation-only changes require no trading restart/build.
+
+## Daily review verified on 2026-10-27
+
+- Direct VM/container inspection confirmed cycle 06:01:35 / risk 06:02:31 success, zero failures/pending orders/restarts/OOM, clean VM Git and matching local/VM/container trading/generator hashes. Disk use 33%, available memory 469 MiB, container memory 95.89 MiB, no zombies. Bot-user GitHub SSH succeeds. Logs after October 26 06:04:58 contain 1,915 INFO records without warnings/errors or trades. Existing 25% position cap and operational settings are unchanged; October 19 errors remain historical.
+- Read-only VM-host Upbit CLI reconciliation 06:02:05–06:02:11 confirms all-cash KRW 57,964.4659928, zero holdings/locked/open orders/new closed orders/flows. Both done/cancel and wait/watch states checked. Lifetime 92 exits / -KRW 7,155.47; current eight trades / -KRW 831.14 (-1.41360% against the existing flow-adjusted baseline). Daily change is zero; old deposits/losses are not new activity.
+- Four journal files contain 1,908 observations from October 7 onward: 96 additions/no rotation, all defensive without holdings/plans. Latest 23 candidates fail 18 ATR/five six-hour momentum gates even with defensive blocking alone bypassed. No new numeric signal at RSI 75/78 or defensive-only candidate; the prior MTL observation is not new evidence. Eighteen-entry ticker-pause and one-path exit diagnostics remain unchanged, with seventeen holding paths unavailable. Keep trading source/configuration unchanged pending independent evidence.
+- All 105 isolated socket-blocked tests passed. Pages run 40398642249 succeeded; public HTTP 200 shows 05:46:35 generation/cycle, risk 05:46:28, zero failures, 92 exits/three decisions without private fields. Publish STRATEGY_REVIEW_2026-10-27.md and this guide, fast-forward the VM and verify final health. Documentation-only changes require no trading restart/build.
 
 ## Security notes
 
